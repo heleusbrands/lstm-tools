@@ -49,13 +49,15 @@ pip install -e .
 
 - **Feature**: A float subclass that represents a single data point with a name attribute. Features can store operations for later execution and integrate with the rest of the LSTM Tools ecosystem.
 
-- **FeatureSample**: A 1D array of Feature objects that represents a time series of a single variable (e.g., price over time). It provides methods for statistical calculations (mean, std, etc.) and allows for custom compression functions to be registered and applied.
-
 - **TimeFrame**: A 1D array of Feature objects that represents a snapshot of multiple variables at a specific point in time (e.g., price, volume, indicator values at timestamp X). It provides attribute-based access to named features.
 
 - **Sample**: A 2D array of TimeFrame objects that represents a sequence of multi-variable observations over time. It provides powerful windowing capabilities and feature-specific operations.
 
 - **Chronicle**: A 3D array of windowed Sample objects, designed for working with batches of windowed data. Ideal for compressing Sample windows down to TimeFrame objects, or preparing data for machine learning models in a format ready for LSTM networks.
+
+- **FeatureSample**: A 1D array of Feature objects that represents a time series of a single variable (e.g., price over time). It provides methods for statistical calculations (mean, std, etc.) and allows for custom compression functions to be registered and applied.
+
+- **FeatureChronicle**: A 2D array of a windowed feature, representing multiple (windowed) time series of a single variable (e.g., price over 60 minute windows). It provides easy methods/properties for statistical calculations on the windows contained within it, and is obtained most frequently by accessing a feature through a Chronicle class instance. 
 
 ## Quick Start
 

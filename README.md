@@ -49,7 +49,7 @@ pip install -e .
 
 - **Feature**: A float subclass that represents a single data point with a name attribute. Features can store operations for later execution and integrate with the rest of the LSTM Tools ecosystem.
 
-- **Features**: A 1D array of Feature objects that represents a time series of a single variable (e.g., price over time). It provides methods for statistical calculations (mean, std, etc.) and allows for custom compression functions to be registered and applied.
+- **FeatureSample**: A 1D array of Feature objects that represents a time series of a single variable (e.g., price over time). It provides methods for statistical calculations (mean, std, etc.) and allows for custom compression functions to be registered and applied.
 
 - **TimeFrame**: A 1D array of Feature objects that represents a snapshot of multiple variables at a specific point in time (e.g., price, volume, indicator values at timestamp X). It provides attribute-based access to named features.
 
@@ -62,11 +62,8 @@ pip install -e .
 ```python
 import numpy as np
 import pandas as pd
-from lstm_tools import Feature, Features, TimeFrame, Sample, Chronicle
+from lstm_tools import Feature, FeatureSample, TimeFrame, Sample, Chronicle
 from lstm_tools.logger import configure_logging
-
-# Enable logging
-configure_logging(level=20)  # INFO level
 
 # Load data from a CSV file
 # The file should have a 'time' column that will be used as the index
@@ -79,7 +76,7 @@ df = pd.DataFrame({
 }, index=pd.date_range(start='2023-01-01', periods=5, freq='D'))
 sample = Sample(df)
 
-# Access features by name (returns a Features object)
+# Access features by name (returns a FeatureSample object)
 price_data = sample.price
 volume_data = sample.volume
 
@@ -93,6 +90,24 @@ sample.window_settings.historical.window_size = 3  # 3 time steps for historical
 sample.window_settings.future.window_size = 2     # 2 time steps for future prediction
 sample.window_settings.stride = 1                 # Step size for sliding windows
 
+# Working with FeatureSample (1D series)
+# Add compression operations to features
+price_data.add_compressor(np.mean) # Method added directly, no name necessary 
+price_data.add_compressor(lambda x: np.std(x), "std_price") # Method via lambda
+
+# Apply all registered compression operations
+compressed = price_data.compress()
+
+# Or use chained operations
+compressed = sample.price.add_compressor(np.mean).add_compressor(lambda x: np.std(x), "std_price").compress()
+
+# Or use the convenience method to add standard operations
+price_data.batch_compress(custom_compressors=[
+    (lambda x: np.max(x) - np.min(x), "range")
+])
+
+# Working with Chronicles (3D windowed data)
+
 # Create historical windows (input data for model)
 historical_data = sample.historical_sliding_window()
 
@@ -100,22 +115,25 @@ historical_data = sample.historical_sliding_window()
 future_data = sample.future_sliding_window()
 
 # Get both historical and future windows in one call
-historical, future = sample.hf_sliding_window()
+historical, future = sample.hf_sliding_window() # Returns a tuple[Chronicle, Chronicle]
 
-# Working with Features (1D series)
-# Add compression operations to features
-price_data.add_compressor(np.mean) # Method added directly, no name necessary 
-price_data.add_compressor(lambda x: np.std(x), "std_price") # Method via lambda
+# Access specific features within the windows
+hist_price = historical.price # Direct array access
 
-# Or use the convenience method to add standard operations
-price_data.batch_compress(custom_compressors=[
-    (lambda x: np.max(x) - np.min(x), "range")
+# Compress with convenience properties
+hist_mean_price = hist_price.mean # Converts from FeatureChronicle -> FeatureSample
+hist_std_price = hist_price.std
+hist_open_price = hist_price.first
+hist_close_price = hist_price.last
+
+# Compile back into new Sample, with calculated features
+compressed_sample = Sample.from_FeatureSamples([
+    hist_mean_price,
+    hist_std_price,
+    hist_open_price,
+    hist_close_price
 ])
 
-# Apply all registered compression operations
-compressed = price_data.compress()
-
-# Working with Chronicles (3D windowed data)
 # Extract statistics across all windows in a single operation
 stats = historical.batch_compress(
     features=['price', 'volume'],  # Process specific features

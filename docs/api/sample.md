@@ -1,6 +1,6 @@
 # Sample
 
-`Sample` is a 2D array of `TimeFrame` objects representing a sequence of multiple features over time. It allows for attribute access of features, which returns a `Features` object, and provides easy windowing capabilities for both historical and future (offset) windows.
+`Sample` is a 2D array of `TimeFrame` objects representing a sequence of multiple features over time. It allows for attribute access of features, which returns a `FeatureSample` object, and provides easy windowing capabilities for both historical and future (offset) windows.
 
 ## Class Definition
 
@@ -112,7 +112,7 @@ def __getitem__(self, key)
   - If `array-like`: Boolean mask or integer indices
 
 **Returns:**
-- `Features`: When a string (feature name) is provided
+- `FeatureSample`: When a string (feature name) is provided
 - `TimeFrame`: When a single index is provided
 - `Sample`: When a slice or array of indices is provided
 
@@ -124,7 +124,7 @@ first_timeframe = sample[0]
 # Get a slice of TimeFrames (returns a Sample)
 subset = sample[1:5]
 
-# Get a feature by name (returns a Features object)
+# Get a feature by name (returns a FeatureSample object)
 temperature = sample['temp']
 
 # Use boolean indexing
@@ -134,7 +134,7 @@ filtered = sample[mask]
 
 ### `__getattr__`
 
-Enables attribute access for features by name, returning a Features object.
+Enables attribute access for features by name, returning a FeatureSample object.
 
 ```python
 def __getattr__(self, name)
@@ -144,7 +144,7 @@ def __getattr__(self, name)
 - **name** (`str`): Name of the attribute/feature to access
 
 **Returns:**
-- `Features`: A Features object containing all values for the requested feature across all timeframes
+- `FeatureSample`: A FeatureSample object containing all values for the requested feature across all timeframes
 
 **Raises:**
 - `AttributeError`: If the feature name is not found in columns
@@ -196,7 +196,7 @@ def get_feature(self, feature, exc=None)
 
 **Parameters:**
 - **feature** (`Union[int, str]`): Feature to retrieve, either by index or name
-- **exc** (`List[Union[int, str]]`, optional): Features to exclude if feature="all"
+- **exc** (`List[Union[int, str]]`, optional): FeatureSample to exclude if feature="all"
 
 **Returns:**
 - `np.ndarray`: Feature data
@@ -221,7 +221,7 @@ def feature_last(self, feature, exc=None)
 
 Each method takes:
 - **feature** (`Union[int, str]`): Feature to analyze, either by index or name
-- **exc** (`List[Union[int, str]]`, optional): Features to exclude if feature="all"
+- **exc** (`List[Union[int, str]]`, optional): FeatureSample to exclude if feature="all"
 
 And returns the corresponding statistical measure as a float.
 
@@ -386,7 +386,7 @@ from sklearn.preprocessing import RobustScaler
 sample_scaled = Sample(data, cols=columns, use_scaler=True, scaler=RobustScaler())
 ```
 
-### Accessing Features
+### Accessing FeatureSample
 
 ```python
 # Access a single timeframe by index
@@ -398,9 +398,9 @@ first_temp = sample[0].temp # Method 2
 first_temp = sample.temp[0] # Method 3
 print(first_temp)  # 1.0
 
-# Access a feature across all timeframes (returns a Features object)
+# Access a feature across all timeframes (returns a FeatureSample object)
 all_temps = sample.temp
-print(all_temps)  # Features([1.0, 4.0, 7.0])
+print(all_temps)  # FeatureSample([1.0, 4.0, 7.0])
 
 # Calculate statistics on a feature
 print(sample.feature_mean('temp'))  # 4.0
@@ -442,8 +442,8 @@ df = pd.DataFrame({
 sample_from_df = Sample.from_dataframe(df)
 
 # Access features
-print(sample_from_df.temperature)  # Features([20.1, 21.5, 22.0])
-print(sample_from_df.humidity)    # Features([45, 48, 51])
+print(sample_from_df.temperature)  # FeatureSample([20.1, 21.5, 22.0])
+print(sample_from_df.humidity)    # FeatureSample([45, 48, 51])
 
 # Convert back to DataFrame
 df_converted = sample_from_df.to_DataFrame()

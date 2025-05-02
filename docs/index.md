@@ -5,7 +5,7 @@ Welcome to the official documentation for LSTM Tools, a high-performance library
 
 ## Introduction
 
-LSTM Tools is designed to make working with time series data intuitive and efficient, particularly when preparing data for machine learning models. Built on numpy's powerful array operations, it provides a hierarchical data structure that makes complex operations simple. It takes a dynamic approach, by changing the functionality of the array based on the current shape of the data.
+LSTM Tools is designed to make working with time series data intuitive and efficient, particularly when preparing data for machine learning models. Built on numpy's powerful array operations, it provides a hierarchical data structure that makes complex operations simple. It takes a dynamic approach, by changing the functionality of the array based on the current shape and content of the data.
 
 ## Key Features
 
@@ -34,7 +34,7 @@ pip install -e .
 - [Getting Started](tutorials/getting_started.md): First steps with LSTM Tools
 - [API Reference](api/index.md): Detailed documentation of all classes and methods
 - [Tutorials](tutorials/index.md): Practical guides for common tasks
-- [Examples](examples/index.md): Real-world usage examples
+- [Pandas Comparison](comparisons/pandas.md): A comparison between LSTM Tools & Pandas
 - [Changelog](changelog.md): Release history and changes
 
 ## Note from Author

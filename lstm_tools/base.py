@@ -69,6 +69,7 @@ class FrameBase(np.ndarray):
     
     subtype = None
     level = 0
+    _idx = None
     format_input_feature = lambda input_data, cols, subtype: [subtype(input_data[i], name) for i, name in enumerate(cols)]
     format_input_sequence = lambda input_data, cols, subtype: [subtype(data, cols = cols, idx = i) for i, data in enumerate(input_data)]
 

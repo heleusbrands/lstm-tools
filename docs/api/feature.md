@@ -1,34 +1,50 @@
 # Feature
 
-`Feature` is a subclass of `float` that represents a single value within a time series or dataset, with a name and integration into the LSTM Tools ecosystem.
+`Feature` is a subclass of `float` that represents a single value within a time series or dataset. It extends the basic float functionality with a name attribute and integration into the LSTM Tools ecosystem.
 
 ## Class Definition
 
 ```python
 class Feature(float):
-    def __new__(cls, value, name, base_dtype=np.float32)
+    def __new__(cls, value: float, name: str, base_dtype=np.float32) -> 'Feature'
 ```
 
 ## Parameters
 
 - **value** (`float`): The numerical value of the feature
 - **name** (`str`): Name of the feature
-- **base_dtype** (`numpy.dtype`, optional): Base data type for the feature. Default is `np.float32`.
+- **base_dtype** (`numpy.dtype`, optional): Base numpy data type for storing the value internally. Default is `np.float32`.
 
 ## Attributes
 
 - **name** (`str`): Name of the feature
-- **_base** (`numpy.dtype`): Base value stored as the specified data type
-- **operations** (`list`): List of operations that can be applied to the feature
+- **_base** (`numpy.dtype`): The value stored as the specified numpy data type
+- **operations** (`list`): List of operations/compressors that can be applied to the feature
 
 ## Methods
+
+### `__new__`
+
+Creates a new Feature instance. This is the constructor method for the Feature class.
+
+```python
+def __new__(cls, value: float, name: str, base_dtype=np.float32) -> 'Feature'
+```
+
+**Parameters:**
+- **value** (`float`): The numerical value of the feature
+- **name** (`str`): Name of the feature
+- **base_dtype** (`numpy.dtype`): Base data type for internal storage
+
+**Returns:**
+- `Feature`: A new Feature instance
 
 ### `__repr__`
 
 Returns a string representation of the Feature.
 
 ```python
-def __repr__(self)
+def __repr__(self) -> str
 ```
 
 **Returns:**
@@ -36,17 +52,17 @@ def __repr__(self)
 
 ### `__add__`
 
-Special method to handle addition with both numbers and callables.
+Special method to handle addition with both numbers and callables. When adding a callable, it appends it to the operations list instead of performing arithmetic.
 
 ```python
-def __add__(self, other)
+def __add__(self, other: Union[float, Callable]) -> Union['Feature', None]
 ```
 
 **Parameters:**
 - **other** (`Union[float, Callable]`): Value to add or callable operation to append
 
 **Returns:**
-- `Union[Feature, None]`: Result of addition or None if operation was appended
+- `Union[Feature, None]`: Result of addition if other is a number, None if other is a callable (operation was appended)
 
 ## Usage Examples
 
@@ -61,202 +77,139 @@ print(f1)  # Feature(pi: 3.14159)
 result = f1 * 2
 print(result)  # 6.28318
 
-# Add operations to the feature
+# Add compression operations to the feature
 def square(x):
     return x * x
 f1 + square  # Adds the square operation to the feature's operations list
 ```
 
-## Features
+# FeatureSample
 
-`Features` is a 1D array of `Feature` objects, representing a time series of values for a specific feature or metric.
+`FeatureSample` is a 1D array of values that represents a time series for a specific feature. It inherits from `FrameBase` and provides methods for compression and statistical operations.
 
-### Class Definition
+## Class Definition
 
 ```python
-class Features(np.ndarray):
-    def __new__(cls, input_array, name=None, meta=None, dtype=None)
+class FeatureSample(FrameBase):
+    def __new__(cls, input_data, name=None, dtype=None, time=None, compressors=[], idx=None)
 ```
 
-### Parameters
+## Parameters
 
-- **input_array** (`array-like`): Input data, can be a list, numpy array, or another Features object
-- **name** (`str`, optional): Name of the feature collection. Default is None.
-- **meta** (`dict`, optional): Metadata associated with the feature collection. Default is None.
-- **dtype** (`dtype`, optional): Data type for the array. Default is None.
+- **input_data** (`Union[list, np.ndarray]`): Input data array
+- **name** (`str`, optional): Name of the feature series. Default is None.
+- **dtype** (`numpy.dtype`, optional): Data type for the array. Default is np.float32.
+- **time** (`Union[pd.DatetimeIndex, str, int, list, np.ndarray], optional`): Time index for the series
+- **compressors** (`list`, optional): List of compression functions to apply. Default is empty list.
+- **idx** (`Any`, optional): Custom index for the series. Default is None.
 
-### Attributes
+## Class Attributes
 
-- **name** (`str`): Name of the feature collection
-- **meta** (`dict`): Metadata dictionary
-- **_level** (`int`): Hierarchy level in the LSTM Tools data structure (always 0)
+- **subtype** (`type`): The type of elements in the array (`Feature`)
+- **level** (`int`): The level in the hierarchy (0 for 1D array)
+- **nptype** (`numpy.dtype`): Default numpy data type (np.float32)
+- **operations** (`class`): Class containing statistical operations (TradeWindowOps)
+
+## Instance Attributes
+
+- **name** (`str`): Name of the feature series
+- **compressors** (`list`): List of compression functions
+- **_time** (`Union[pd.DatetimeIndex, str, int, list, np.ndarray]`): Time index
 - **_shape** (`tuple`): Shape of the array
-- **_compression_functions** (`list`): List of compression functions to apply
+- **_level** (`int`): Hierarchy level (always 0)
+- **_idx** (`Any`): Custom index
 
-### Methods
+## Methods
 
-#### Factory Methods
+### Compression Methods
 
-##### `from_list`
+#### `add_compressor`
 
-Creates a Features object from a list of values.
+Add a compression function to be applied when the compress method is called.
 
 ```python
-@classmethod
-def from_list(cls, values, name=None, meta=None)
+def add_compressor(self, compressor: Callable, name: str = None) -> 'FeatureSample'
 ```
 
 **Parameters:**
-
-- **values** (`list`): List of values to convert
-- **name** (`str`, optional): Name for the Features object
-- **meta** (`dict`, optional): Metadata for the Features object
+- **compressor** (`callable`): Function to be applied to the FeatureSample array
+- **name** (`str`, optional): Name for the compressor. If None, uses function name
 
 **Returns:**
+- `FeatureSample`: Self reference for method chaining
 
-- `Features`: New Features object
+#### `compress`
 
-##### `from_dataframe`
-
-Creates a Features object from a pandas DataFrame column.
+Apply all registered compression functions to create a TimeFrame.
 
 ```python
-@classmethod
-def from_dataframe(cls, df, col_name, meta=None)
+def compress(self) -> 'TimeFrame'
+```
+
+**Returns:**
+- `TimeFrame`: A new TimeFrame containing the compressed values
+
+#### `batch_compress`
+
+Apply a batch of common compression operations to the FeatureSample.
+
+```python
+def batch_compress(self, common_operations: bool = True, custom_compressors: List[Callable] = None) -> 'FeatureSample'
 ```
 
 **Parameters:**
-
-- **df** (`pandas.DataFrame`): Source DataFrame
-- **col_name** (`str`): Column name to extract
-- **meta** (`dict`, optional): Metadata for the Features object
+- **common_operations** (`bool`): Whether to include common operations (mean, std, etc.)
+- **custom_compressors** (`list`): List of custom compressor functions to add
 
 **Returns:**
+- `FeatureSample`: Self reference for method chaining
 
-- `Features`: New Features object with the column's name
+### Statistical Properties
 
-#### Compression Methods
+The following statistical properties are available:
 
-##### `register_compression_function`
+- **mean**: Calculate the mean of the series
+- **std**: Calculate the standard deviation
+- **var**: Calculate the variance
+- **skew**: Calculate the skewness
+- **kurtosis**: Calculate the kurtosis
+- **first**: Get the first value
+- **last**: Get the last value
+- **sum**: Calculate the sum
+- **min**: Get the minimum value
+- **max**: Get the maximum value
+- **median**: Calculate the median
 
-Registers a function to be used for compression.
+Each property returns the corresponding statistical measure as a float value.
 
-```python
-def register_compression_function(self, func)
-```
-
-**Parameters:**
-
-- **func** (`callable`): Function that takes a Features object and returns a value or Feature
-
-##### `compress`
-
-Compresses the Features using the registered compression functions.
-
-```python
-def compress(self, funcs=None)
-```
-
-**Parameters:**
-
-- **funcs** (`list`, optional): List of compression functions to use. If None, uses registered functions.
-
-**Returns:**
-
-- `Feature` or `list`: Compressed feature(s)
-
-#### Common Statistical Functions
-
-The Features class provides several built-in statistical functions:
-
-- **mean**: Calculate the mean of the Features
-- **min**: Find the minimum value in the Features
-- **max**: Find the maximum value in the Features
-- **median**: Calculate the median of the Features
-- **std**: Calculate the standard deviation of the Features
-- **var**: Calculate the variance of the Features
-- **sum**: Calculate the sum of all values in the Features
-- **count**: Get the number of elements in the Features
-
-#### Utility Methods
-
-##### `to_dict`
-
-Returns a dictionary representation of the Features.
+## Usage Examples
 
 ```python
-def to_dict(self)
-```
+from lstm_tools import FeatureSample
 
-**Returns:**
+# Create a feature sample
+data = [1.0, 2.0, 3.0, 4.0, 5.0]
+sample = FeatureSample(data, name="temperature")
 
-- `dict`: Dictionary containing the array data and metadata
+# Access statistical properties
+print(sample.mean)    # 3.0
+print(sample.std)     # 1.4142135623730951
+print(sample.min)     # 1.0
+print(sample.max)     # 5.0
 
-##### `from_dict`
+# Add custom compressors
+def range_calc(x):
+    return x.max() - x.min()
 
-Creates a Features object from a dictionary.
+sample.add_compressor(range_calc, "range")
+sample.add_compressor(lambda x: x.mean(), "avg")
 
-```python
-@classmethod
-def from_dict(cls, data)
-```
+# Compress the sample
+compressed = sample.compress()
+# Returns a TimeFrame with features: temperature_range, temperature_avg
 
-**Parameters:**
-
-- **data** (`dict`): Dictionary containing the feature data and metadata
-
-**Returns:**
-
-- `Features`: A new Features instance
-
-### Usage Examples
-
-```python
-import numpy as np
-from lstm_tools import Features, Feature
-
-# Create from a list of values
-values = [1.0, 2.0, 3.0, 4.0, 5.0]
-features = Features(values, name="temperature")
-
-# Create from numpy array
-array_data = np.array([10.5, 11.2, 9.8, 10.1])
-humidity = Features(array_data, name="humidity")
-
-# Access individual values (returns Feature objects)
-first_temp = features[0]
-print(first_temp)  # 1.0
-print(type(first_temp))  # <class 'lstm_tools.feature.Feature'>
-
-# Calculate statistics
-avg_temp = features.mean()
-print(avg_temp)  # 3.0
-
-max_humidity = humidity.max()
-print(max_humidity)  # 11.2
-
-# Register and use compression functions
-features.register_compression_function(lambda x: x.mean())
-features.register_compression_function(lambda x: x.max())
-
-# Compress to get summary statistics
-compressed = features.compress()
-print(compressed)  # [3.0, 5.0]
-
-# Custom compression function
-def range_feature(feat):
-    return Feature(feat.max() - feat.min(), meta={"type": "range"})
-
-features.register_compression_function(range_feature)
-result = features.compress()
-print(result[-1])  # 4.0
-print(result[-1].meta)  # {"type": "range"}
-
-# Working with pandas DataFrame
-import pandas as pd
-df = pd.DataFrame({
-    'temperature': [20.1, 21.5, 22.0, 21.8],
-    'humidity': [45, 48, 51, 47]
-})
-temp_features = Features.from_dataframe(df, 'temperature')
+# Batch compress with common operations
+sample.batch_compress(common_operations=True)
+compressed = sample.compress()
+# Returns a TimeFrame with common statistical measures
 ``` 

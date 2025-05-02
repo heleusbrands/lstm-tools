@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 from typing import List, Tuple, Union
 from .base import FrameBase
-from .feature import Features
+from .feature import FeatureSample
 from .timeframe import TimeFrame
 from .utils import *
 from .settings import HFWindowSettings
@@ -200,7 +200,7 @@ class Sample(FrameBase):
         if isinstance(item, str):
             # Get by column name
             idx = self._cols.index(item)
-            return Features(np.array(self).view(np.ndarray)[:, idx], name=item, time=self._time)
+            return FeatureSample(np.array(self).view(np.ndarray)[:, idx], name=item, time=self._time)
         elif isinstance(item, int):
             # Get by numeric index - return a TimeFrame
             if not (0 <= item < len(self)):
@@ -241,7 +241,7 @@ class Sample(FrameBase):
                 # Get the index using the super implementation to avoid recursion
                 arr = super().__getattribute__('__array__')()
                 idx = cols.index(name)
-                return arr[:, idx]
+                return FeatureSample(arr[:, idx], name=name, time=self._time)
         except (AttributeError, ValueError):
             pass
         return super().__getattribute__(name)
@@ -610,7 +610,7 @@ class Sample(FrameBase):
         feature : Union[int, str]
             Feature to retrieve, either by index or name.
         exc : List[Union[int, str]], optional
-            Features to exclude if feature="all", by default None.
+            FeatureSample to exclude if feature="all", by default None.
 
         Returns
         -------
@@ -645,7 +645,7 @@ class Sample(FrameBase):
         feature : Union[int, str]
             Feature to analyze, either by index or name.
         exc : List[Union[int, str]], optional
-            Features to exclude if feature="all", by default None.
+            FeatureSample to exclude if feature="all", by default None.
 
         Returns
         -------
@@ -664,7 +664,7 @@ class Sample(FrameBase):
         feature : Union[int, str]
             Feature to analyze, either by index or name.
         exc : List[Union[int, str]], optional
-            Features to exclude if feature="all", by default None.
+            FeatureSample to exclude if feature="all", by default None.
 
         Returns
         -------
@@ -683,7 +683,7 @@ class Sample(FrameBase):
         feature : Union[int, str]
             Feature to analyze, either by index or name.
         exc : List[Union[int, str]], optional
-            Features to exclude if feature="all", by default None.
+            FeatureSample to exclude if feature="all", by default None.
 
         Returns
         -------
@@ -702,7 +702,7 @@ class Sample(FrameBase):
         feature : Union[int, str]
             Feature to analyze, either by index or name.
         exc : List[Union[int, str]], optional
-            Features to exclude if feature="all", by default None.
+            FeatureSample to exclude if feature="all", by default None.
 
         Returns
         -------
@@ -721,7 +721,7 @@ class Sample(FrameBase):
         feature : Union[int, str]
             Feature to analyze, either by index or name.
         exc : List[Union[int, str]], optional
-            Features to exclude if feature="all", by default None.
+            FeatureSample to exclude if feature="all", by default None.
 
         Returns
         -------
@@ -740,7 +740,7 @@ class Sample(FrameBase):
         feature : Union[int, str]
             Feature to analyze, either by index or name.
         exc : List[Union[int, str]], optional
-            Features to exclude if feature="all", by default None.
+            FeatureSample to exclude if feature="all", by default None.
 
         Returns
         -------
@@ -759,7 +759,7 @@ class Sample(FrameBase):
         feature : Union[int, str]
             Feature to analyze, either by index or name.
         exc : List[Union[int, str]], optional
-            Features to exclude if feature="all", by default None.
+            FeatureSample to exclude if feature="all", by default None.
 
         Returns
         -------
@@ -778,7 +778,7 @@ class Sample(FrameBase):
         feature : Union[int, str]
             Feature to analyze, either by index or name.
         exc : List[Union[int, str]], optional
-            Features to exclude if feature="all", by default None.
+            FeatureSample to exclude if feature="all", by default None.
 
         Returns
         -------
@@ -797,7 +797,7 @@ class Sample(FrameBase):
         feature : Union[int, str]
             Feature to analyze, either by index or name.
         exc : List[Union[int, str]], optional
-            Features to exclude if feature="all", by default None.
+            FeatureSample to exclude if feature="all", by default None.
 
         Returns
         -------
@@ -816,7 +816,7 @@ class Sample(FrameBase):
         feature : Union[int, str]
             Feature to analyze, either by index or name.
         exc : List[Union[int, str]], optional
-            Features to exclude if feature="all", by default None.
+            FeatureSample to exclude if feature="all", by default None.
 
         Returns
         -------
@@ -986,3 +986,17 @@ class Sample(FrameBase):
             y = future_data
             logger.info(f"Created NumPy arrays with shapes: X {X.shape}, y {y.shape}")
             return X, y, X_time, y_time
+        
+    @classmethod
+    def from_FeatureSamples(cls, feature_samples: List[FeatureSample]):
+        lengths = [len(fs) for fs in feature_samples]
+        if not all(length == lengths[0] for length in lengths):
+            raise ValueError("All feature samples must have the same length")
+        
+        # Create a new Sample with the combined data
+        return cls(
+            np.stack([f._as_nparray() for f in feature_samples], axis=1), 
+            cols=[f.name for f in feature_samples], 
+            time=feature_samples[0]._time
+        )
+        

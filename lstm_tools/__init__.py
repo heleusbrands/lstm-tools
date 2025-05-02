@@ -5,7 +5,7 @@ with a focus on easy windowing, feature compression, and machine learning integr
 
 Main Classes:
 - Feature: A float subclass representing an individual data point
-- Features: A 1D array of Feature objects for a single time series
+- FeatureSample: A 1D array of Feature objects for a single time series
 - TimeFrame: A 1D array of Feature objects for a point in time
 - Sample: A 2D array of TimeFrame objects for a sequence of observations
 - Chronicle: A 3D array of windowed samples for ML model training
@@ -19,7 +19,7 @@ __license__ = "GPL-3.0-only"
 # Core classes
 from .timeframe import TimeFrame
 from .sample import Sample
-from .feature import Feature, Features
+from .feature import Feature, FeatureSample
 from .chronicle import Chronicle
 
 # Settings and configuration

@@ -44,7 +44,7 @@ class TimeFrame(FrameBase):
     nptype = np.float32
 
     """
-    1D Array of Features
+    1D Array of FeatureSample
     """
 
     @profile

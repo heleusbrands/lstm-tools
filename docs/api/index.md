@@ -5,10 +5,11 @@ This section provides detailed documentation for all modules, classes, and funct
 ## Core Classes
 
 - [Feature](feature.md): A single data point with a name attribute
-- [Features](features.md): A 1D array of Feature objects for a single variable
-- [TimeFrame](timeframe.md): A 1D array of Feature objects for a snapshot in time
+- [TimeFrame](timeframe.md): A 1D array of distinct Feature objects for a snapshot in time
 - [Sample](sample.md): A 2D array of TimeFrame objects for a sequence
 - [Chronicle](chronicle.md): A 3D array of windowed Sample objects
+- [FeatureSample](featuresample.md): A 1D array of similar Feature objects over time
+- [FeatureChronicle](featurechronicle.md): A 2D array of windowed FeatureSample objects
 
 ## Settings and Configuration
 

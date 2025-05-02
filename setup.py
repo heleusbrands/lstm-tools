@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="lstm-tools",
-    version="0.1.0",
+    version="0.2.0",
     author="Rose Bloom Research Co",
     author_email="rosebloomresearch@gmail.com",
     description="A high-performance library for dynamically handling sequential data",
@@ -15,7 +15,7 @@ setup(
         "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
         "Operating System :: OS Independent",
     ],
-    python_requires=">=3.7",
+    python_requires=">=3.10",
     install_requires=[
         "numpy>=1.26.2",
         "pandas>=2.1.4",

@@ -1,6 +1,6 @@
 # Chronicle
 
-`Chronicle` is a 3D array of windowed `Sample` objects. It's designed for use when windowing and/or compressing samples, providing a powerful way to organize and manipulate multi-window data structures.
+`Chronicle` is a 3D array-like object for representing chronicles in time series data. It extends `FrameBase` to include chronicle-specific attributes and methods, designed for efficient handling of windowed and compressed time series data.
 
 ## Class Definition
 
@@ -8,38 +8,45 @@
 class Chronicle(FrameBase):
     def __new__(
         cls, 
-        input_data, 
-        cols, 
-        idx=None, 
-        name=None, 
-        dtype=None, 
-        is_gen=False, 
-        scaler=None, 
-        preserve_base=True, 
-        time=None)
+        input_data: Union[np.ndarray, list], 
+        cols: List[str], 
+        idx: Optional[int] = None, 
+        name: Optional[str] = None, 
+        dtype: Optional[np.dtype] = None, 
+        is_gen: bool = False, 
+        scaler: Optional[Any] = None, 
+        preserve_base: bool = True, 
+        time: Optional[np.ndarray] = None
+    ) -> 'Chronicle'
 ```
+
+## Class Attributes
+
+- **subtype** (`type`): The type of elements in the array (`Sample`)
+- **level** (`int`): The level in the hierarchy (0)
+- **nptype** (`numpy.dtype`): Default numpy data type (`np.float32`)
 
 ## Parameters
 
-- **input_data** (`array-like`): Input data, can be a list, numpy array, or another Chronicle object
-- **cols** (`list`): List of column/feature names
-- **idx** (`int`, optional): Index of the chronicle. Default is None.
-- **name** (`str`, optional): Name of the chronicle. Default is None.
-- **dtype** (`dtype`, optional): Data type for the array. Default is None.
-- **is_gen** (`bool`, optional): Whether the chronicle is generated. Default is False.
-- **scaler** (`object`, optional): Scaler used for the chronicle. Default is None.
-- **preserve_base** (`bool`, optional): Whether to preserve the base data. Default is True.
-- **time** (`np.ndarray`, optional): Time values for the chronicle. Default is None.
+- **input_data** (`Union[np.ndarray, list]`): Input data to create the chronicle
+- **cols** (`List[str]`): List of column names for the chronicle
+- **idx** (`Optional[int]`): Index of the chronicle. Default is None.
+- **name** (`Optional[str]`): Name of the chronicle. Default is None.
+- **dtype** (`Optional[np.dtype]`): Data type of the chronicle. Default is None.
+- **is_gen** (`bool`): Whether the chronicle is generated. Default is False.
+- **scaler** (`Optional[Any]`): Scaler used for the chronicle. Default is None.
+- **preserve_base** (`bool`): Whether to preserve the base data. Default is True.
+- **time** (`Optional[np.ndarray]`): Time values for the chronicle. Default is None.
 
-## Attributes
+## Instance Attributes
 
-- **_cols** (`list`): List of column/feature names
-- **_time** (`np.ndarray`): Time values for the chronicle
+- **_cols** (`List[str]`): List of column/feature names
+- **_time** (`Optional[np.ndarray]`): Time values for the chronicle
 - **_shape** (`tuple`): Shape of the array
-- **_idx** (`int`): Index of the chronicle
-- **_level** (`int`): Hierarchy level in the LSTM Tools data structure
-- **scaler** (`object`): Scaler used for the chronicle
-- **name** (`str`): Name of the chronicle
+- **_idx** (`Optional[int]`): Index of the chronicle
+- **_level** (`int`): Hierarchy level (always 0)
+- **scaler** (`Optional[Any]`): Scaler used for the chronicle
+- **name** (`Optional[str]`): Name of the chronicle
 - **is_gen** (`bool`): Whether the chronicle is generated
 
 ## Methods
@@ -49,7 +56,7 @@ class Chronicle(FrameBase):
 Get items from the Chronicle by index, feature name, or slice.
 
 ```python
-def __getitem__(self, item)
+def __getitem__(self, item: Union[str, int, slice, tuple]) -> Union[Sample, np.ndarray]
 ```
 
 **Parameters:**
@@ -60,68 +67,152 @@ def __getitem__(self, item)
   - If tuple: For multi-dimensional indexing
 
 **Returns:**
-- `Union[Sample, np.ndarray]`: Data based on the input type
+- `Union[Sample, np.ndarray]`: Chronicle data based on the input type
+
+**Raises:**
+- `IndexError`: If the index is out of bounds
 
 **Example:**
 ```python
 >>> chronicle = sample.historical_sliding_window()
 >>> sample_window = chronicle[0]        # Get first sample window
 >>> price_data = chronicle['price']     # Get all price data across windows
->>> subset = chronicle[0:10]            # Get first 10 windows
+>>> subset = chronicle[0:10]           # Get first 10 windows
 ```
-
-### `__array__`
-
-Return the underlying array data.
-
-```python
-def __array__(self)
-```
-
-**Returns:**
-- `np.ndarray`: The underlying NumPy array data
-
-### `__array_finalize__`
-
-Finalize the array creation process.
-
-```python
-def __array_finalize__(self, obj)
-```
-
-**Parameters:**
-- **obj** (`object`): Object to finalize
 
 ### `merge_samples_to_chronicle`
 
-Merge a list of Sample instances into a Chronicle by combining their TimeFrames.
+Merge a list of Sample instances into a Chronicle.
 
 ```python
 @classmethod
-def merge_samples_to_chronicle(cls, samples)
+def merge_samples_to_chronicle(cls, samples: List[Sample]) -> Chronicle
 ```
 
 **Parameters:**
-- **samples** (`List[Sample]`): List of Sample instances to merge. All samples must have the same length and time values.
+- **samples** (`List[Sample]`): List of Sample instances to merge
 
 **Returns:**
 - `Chronicle`: Chronicle instance containing the merged samples
 
 **Raises:**
-- `ValueError`: If samples list is empty, or if samples have different lengths or time values
+- `EmptyDataError`: If samples list is empty
+- `InvalidDataTypeError`: If samples have invalid types
+- `DataError`: If samples have different lengths or time values
 
-**Example:**
+### Tensor Conversion Methods
+
+#### `to_ptTensor`
+
+Convert the Chronicle to a PyTorch tensor.
+
 ```python
->>> samples = [Sample(data1, cols), Sample(data2, cols), Sample(data3, cols)]
->>> chronicle = Chronicle.merge_samples_to_chronicle(samples)
+def to_ptTensor(self, device: str = 'cpu') -> torch.Tensor
 ```
 
-### `compress`
+**Parameters:**
+- **device** (`str`): PyTorch device to place the tensor on. Default is 'cpu'.
+
+**Returns:**
+- `torch.Tensor`: PyTorch tensor representation of the Chronicle
+
+#### `to_tfTensor`
+
+Convert the Chronicle to a TensorFlow tensor.
+
+```python
+def to_tfTensor(self, device: str = 'cpu') -> tf.Tensor
+```
+
+**Parameters:**
+- **device** (`str`): TensorFlow device to place the tensor on. Default is 'cpu'.
+
+**Returns:**
+- `tf.Tensor`: TensorFlow tensor representation of the Chronicle
+
+#### `to_tensor`
+
+Convert the Chronicle to a tensor based on the available framework.
+
+```python
+def to_tensor(self, device: str = 'cpu') -> Union[torch.Tensor, tf.Tensor]
+```
+
+**Parameters:**
+- **device** (`str`): Device to place the tensor on. Default is 'cpu'.
+
+**Returns:**
+- `Union[torch.Tensor, tf.Tensor]`: Tensor representation of the Chronicle
+
+### Data Processing Methods
+
+#### `xy_dataset`
+
+Create an input-output dataset from the Chronicle data.
+
+```python
+def xy_dataset(
+    self, 
+    x: np.ndarray, 
+    y: np.ndarray, 
+    future_size: int, 
+    historical_size: int, 
+    step_size: int = 1
+) -> Tuple[np.ndarray, np.ndarray]
+```
+
+**Parameters:**
+- **x** (`np.ndarray`): Input data array
+- **y** (`np.ndarray`): Output data array
+- **future_size** (`int`): Size of the future window
+- **historical_size** (`int`): Size of the historical window
+- **step_size** (`int`): Step size between consecutive windows. Default is 1.
+
+**Returns:**
+- `Tuple[np.ndarray, np.ndarray]`: Tuple containing (x_windows, y_windows)
+
+#### `batch`
+
+Get a batch of data from the Chronicle.
+
+```python
+def batch(self, y: Chronicle, batch_size: int) -> Tuple[np.ndarray, np.ndarray]
+```
+
+**Parameters:**
+- **y** (`Chronicle`): Output Chronicle
+- **batch_size** (`int`): Size of the batch
+
+**Returns:**
+- `Tuple[np.ndarray, np.ndarray]`: Tuple containing (batch, y_batch)
+
+#### `subwindow_over_samples`
+
+Create a subwindow view of the Chronicle across all samples.
+
+```python
+def subwindow_over_samples(
+    self, 
+    window_size: int, 
+    direction: str = 'backward'
+) -> Chronicle
+```
+
+**Parameters:**
+- **window_size** (`int`): Size of the window to create
+- **direction** (`str`): Direction to create the window, either 'forward' or 'backward'. Default is 'backward'.
+
+**Returns:**
+- `Chronicle`: A new Chronicle instance containing the subwindow view
+
+### Compression Methods
+
+#### `compress`
 
 Compress a feature using a method.
 
 ```python
-def compress(self, feature, method)
+def compress(self, feature: str, method: callable) -> np.ndarray
 ```
 
 **Parameters:**
@@ -131,242 +222,61 @@ def compress(self, feature, method)
 **Returns:**
 - `np.ndarray`: Compressed feature data
 
-**Example:**
-```python
->>> chronicle = sample.historical_sliding_window()
->>> # Compress the 'price' feature using the mean function
->>> mean_prices = chronicle.compress('price', np.mean)
->>> print(mean_prices.shape)  # One value per window
-```
-
-### `batch_compress`
+#### `batch_compress`
 
 Compress multiple features using multiple methods.
 
 ```python
-def batch_compress(self, features=None, methods=None)
+def batch_compress(
+    self, 
+    features: Optional[List[str]] = None, 
+    methods: Optional[Dict[str, callable]] = None
+) -> Dict[str, np.ndarray]
 ```
 
 **Parameters:**
-- **features** (`list` or `None`, optional): List of feature names or indices to compress. If None, uses all features.
-- **methods** (`dict` or `None`, optional): Dictionary mapping method names to callable functions. If None, uses standard statistical methods (mean, std, min, max).
+- **features** (`Optional[List[str]]`): List of feature names to compress. If None, uses all features.
+- **methods** (`Optional[Dict[str, callable]]`): Dictionary mapping method names to callable functions. If None, uses standard statistical methods.
 
 **Returns:**
-- `dict`: Dictionary where keys are '{feature_name}_{method_name}' and values are the compressed results
-
-**Example:**
-```python
->>> chronicle = sample.historical_sliding_window()
->>> # Compress all features with default methods
->>> compressed = chronicle.batch_compress()
->>> # Compress specific features with specific methods
->>> compressed = chronicle.batch_compress(
-...     features=['price', 'volume'],
-...     methods={'mean': np.mean, 'range': lambda x: np.max(x) - np.min(x)}
-... )
->>> for key, value in compressed.items():
-...     print(f"{key}: {value.shape}")
-```
-
-### `subwindow_over_samples`
-
-Create a subwindow view of the Chronicle across all samples.
-
-```python
-def subwindow_over_samples(self, window_size, direction='backward')
-```
-
-**Parameters:**
-- **window_size** (`int`): Size of the window to create
-- **direction** (`str`, optional): Direction to create the window, either 'forward' or 'backward'. Default is 'backward'.
-
-**Returns:**
-- `Chronicle`: A new Chronicle instance containing the subwindow view
-
-**Example:**
-```python
->>> chronicle = sample.historical_sliding_window()
->>> # Get the last 5 time steps of each window
->>> last_5 = chronicle.subwindow_over_samples(5, direction='backward')
->>> # Get the first 5 time steps of each window
->>> first_5 = chronicle.subwindow_over_samples(5, direction='forward')
-```
-
-### `xy_dataset`
-
-Create an input-output dataset from the Chronicle data.
-
-```python
-def xy_dataset(self, x, y, future_size, historical_size, step_size=1)
-```
-
-**Parameters:**
-- **x** (`np.ndarray`): Input data array
-- **y** (`np.ndarray`): Output data array
-- **future_size** (`int`): Size of the future window
-- **historical_size** (`int`): Size of the historical window
-- **step_size** (`int`, optional): Step size between consecutive windows. Default is 1.
-
-**Returns:**
-- `tuple`: Tuple containing (x_windows, y_windows) as numpy arrays
-
-**Example:**
-```python
->>> chronicle = sample.historical_sliding_window()
->>> # Create input/output windows
->>> x_data = np.array(chronicle)
->>> y_data = np.array(future_chronicle)
->>> x_windows, y_windows = chronicle.xy_dataset(
-...     x_data, y_data, future_size=5, historical_size=30, step_size=1
-... )
-```
-
-### `batch`
-
-Get a batch of data from the Chronicle.
-
-```python
-def batch(self, y, batch_size)
-```
-
-**Parameters:**
-- **y** (`Chronicle`): Output Chronicle
-- **batch_size** (`int`): Size of the batch
-
-**Returns:**
-- `tuple`: Tuple containing (batch, y_batch)
-
-**Example:**
-```python
->>> historical, future = sample.hf_sliding_window()
->>> x_batch, y_batch = historical.batch(future, batch_size=32)
->>> # Use the batches for training
->>> model.train_on_batch(x_batch, y_batch)
-```
-
-### Tensor Conversion Methods
-
-#### `to_ptTensor`
-
-Convert the Chronicle data to a PyTorch tensor.
-
-```python
-def to_ptTensor(self, device='cpu')
-```
-
-**Parameters:**
-- **device** (`str` or `torch.device`): Device to place the tensor on. Default is 'cpu'.
-
-**Returns:**
-- `torch.Tensor`: Chronicle data as a PyTorch tensor on the specified device
-
-#### `to_tfTensor`
-
-Convert the Chronicle data to a TensorFlow tensor.
-
-```python
-def to_tfTensor(self, device='cpu')
-```
-
-**Parameters:**
-- **device** (`str` or `tf.device`): Device to place the tensor on. Default is 'cpu'.
-
-**Returns:**
-- `tf.Tensor`: Chronicle data as a TensorFlow tensor on the specified device
-
-#### `to_tensor`
-
-Alias for `to_ptTensor`.
-
-```python
-def to_tensor(self, device='cpu')
-```
-
-**Parameters:**
-- **device** (`str` or `torch.device`): Device to place the tensor on. Default is 'cpu'.
-
-**Returns:**
-- `torch.Tensor`: Chronicle data as a PyTorch tensor on the specified device
+- `Dict[str, np.ndarray]`: Dictionary where keys are '{feature_name}_{method_name}' and values are the compressed results
 
 ## Usage Examples
 
-### Creating a Chronicle
-
 ```python
-from lstm_tools import Sample, Chronicle
 import numpy as np
+from lstm_tools import Chronicle, Sample
 
-# Typically created from sliding windows
-sample = Sample(data, cols=['price', 'volume', 'volatility'])
-sample.window_settings.historical.window_size = 30
-chronicle = sample.historical_sliding_window()
+# Create sample data
+data = np.random.randn(100, 10, 3)  # 100 windows, 10 timesteps, 3 features
+cols = ['price', 'volume', 'volatility']
 
-# Or manually from a list of samples
-samples = [
-    Sample(window1_data, cols=['price', 'volume', 'volatility']),
-    Sample(window2_data, cols=['price', 'volume', 'volatility']),
-    Sample(window3_data, cols=['price', 'volume', 'volatility'])
-]
-chronicle = Chronicle.merge_samples_to_chronicle(samples)
-```
+# Create a Chronicle
+chronicle = Chronicle(data, cols=cols)
 
-### Feature Compression
+# Access data
+first_window = chronicle[0]  # Returns a Sample
+price_data = chronicle['price']  # Returns all price data
+subset = chronicle[10:20]  # Returns a Chronicle with 10 windows
 
-```python
-# Compress a single feature with a single method
-mean_prices = chronicle.compress('price', np.mean)
-std_volumes = chronicle.compress('volume', np.std)
-
-# Batch compress multiple features with multiple methods
-compressed = chronicle.batch_compress(
-    features=['price', 'volume'],
-    methods={
-        'mean': np.mean,
-        'std': np.std,
-        'min': np.min,
-        'max': np.max,
-        'range': lambda x: np.max(x) - np.min(x)
-    }
+# Create input-output dataset
+x_data = np.array(chronicle)
+y_data = np.array(future_chronicle)
+x_windows, y_windows = chronicle.xy_dataset(
+    x_data, y_data, 
+    future_size=5, 
+    historical_size=30, 
+    step_size=1
 )
 
-# Access the compressed results
-price_means = compressed['price_mean']
-volume_ranges = compressed['volume_range']
-```
+# Compress features
+mean_prices = chronicle.compress('price', np.mean)
+compressed = chronicle.batch_compress(
+    features=['price', 'volume'],
+    methods={'mean': np.mean, 'std': np.std}
+)
 
-### Creating Machine Learning Datasets
-
-```python
-# First create historical and future windows
-sample.window_settings.historical.window_size = 30  # 30 time steps for input
-sample.window_settings.future.window_size = 5      # 5 time steps for output
-historical, future = sample.hf_sliding_window()
-
-# Convert to tensors for deep learning
-import torch
-X = historical.to_ptTensor(device='cuda:0')
-y = future.to_ptTensor(device='cuda:0')
-
-# Create PyTorch dataset and dataloader
-dataset = torch.utils.data.TensorDataset(X, y)
-dataloader = torch.utils.data.DataLoader(dataset, batch_size=32, shuffle=True)
-
-# Or get batches directly
-for i in range(0, len(historical), 32):
-    x_batch, y_batch = historical.batch(future, batch_size=32)
-    # Use batches for training
-    # model.train_on_batch(x_batch, y_batch)
-```
-
-### Subwindowing
-
-```python
-# Get only the recent part of each historical window
-chronicle = sample.historical_sliding_window()
-recent_data = chronicle.subwindow_over_samples(window_size=10, direction='backward')
-
-# Convert to tensor for model input
-import torch
-tensor = recent_data.to_ptTensor()
-predictions = model(tensor)
+# Convert to tensors
+pt_tensor = chronicle.to_ptTensor(device='cuda')  # PyTorch tensor
+tf_tensor = chronicle.to_tfTensor()  # TensorFlow tensor
 ``` 

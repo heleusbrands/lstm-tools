@@ -26,9 +26,9 @@ class Feature(float):
             return super().__add__(other)
 
 
-class Features(FrameBase):
+class FeatureSample(FrameBase):
     """
-    1D Array of Features
+    1D Array of FeatureSample
     """
     subtype = Feature
     level = 0
@@ -42,7 +42,8 @@ class Features(FrameBase):
                 name=None,
                 dtype=None,
                 time = None,
-                compressors = []
+                compressors = [],
+                idx = None
                 ): #TODO: Change this to no longer be a ndarray subclass, but rather a wrapper that includes an __array__ method
         # Create a new instance of the array
 
@@ -51,7 +52,7 @@ class Features(FrameBase):
             raise ValueError("input_data cannot be None")
         
         if len(input_data) == 0:
-            raise ValueError("input_data cannot be empty")
+            raise ValueError(f"input_data cannot be empty. Received: {input_data}")
             
         if not isinstance(input_data, (list, np.ndarray)):
             raise TypeError(f"input_data must be a list or numpy array, got {type(input_data)}")
@@ -86,6 +87,7 @@ class Features(FrameBase):
         obj._shape = base_data.shape
         obj._level = 0
         obj._original_input = input_data  # Store original if needed for reference
+        obj._idx = idx
         return obj
     
     def __array_finalize__(self, obj):
@@ -96,14 +98,15 @@ class Features(FrameBase):
         self._shape = getattr(obj, '_shape', None)
         self._level = getattr(obj, '_level', None)
         self._original_input = getattr(obj, '_original_input', None)
+        self._idx = getattr(obj, '_idx', None)
 
     def __getitem__(self, item):
         if isinstance(item, slice):
-            return Features(super().__getitem__(item), name=self.name, time=self._time[item], compressors=self.compressors)
+            return FeatureSample(self._as_nparray()[item], name=self.name, time=self._time[item], compressors=self.compressors)
         elif isinstance(item, int):
-            return self.subtype(super().__getitem__(item), name=self.name)
+            return self.subtype(self._as_nparray()[item], name=self.name)
         else:
-            return super().__getitem__(item)
+            return self._as_nparray()[item]
         
     def __add__(self, other):
         if callable(other):
@@ -129,7 +132,7 @@ class Features(FrameBase):
         Parameters
         ----------
         compressor : callable
-            Function to be applied to the Features array.
+            Function to be applied to the FeatureSample array.
             Should take a numpy array as input and return a scalar value.
         name : str, optional
             Name to assign to the compressor. If None, will use function's name
@@ -137,7 +140,7 @@ class Features(FrameBase):
             
         Returns
         -------
-        Features
+        FeatureSample
             Self reference for method chaining
             
         Examples
@@ -166,12 +169,12 @@ class Features(FrameBase):
         # Convert to numpy array before compression
         data = self._as_nparray()
         feats = [comp(data) for comp in self.compressors]
-        cols = [comp.__name__ for comp in self.compressors]
+        cols = [f"{self.name}_{comp.__name__}" for comp in self.compressors]
         return TimeFrame(feats, cols=cols, time=self._time[0] if self._time else None)
     
     def batch_compress(self, common_operations=True, custom_compressors=None):
         """
-        Apply a batch of common compression operations to the Features.
+        Apply a batch of common compression operations to the FeatureSample.
         
         Parameters
         ----------
@@ -182,7 +185,7 @@ class Features(FrameBase):
             
         Returns
         -------
-        Features
+        FeatureSample
             Self reference for method chaining
             
         Examples
@@ -257,3 +260,257 @@ class Features(FrameBase):
     def median(self):
         return self.operations.median(self._as_nparray())
         
+
+class FeatureChronicle(FrameBase):
+    """
+    2D Array of FeatureSample objects, representing windowed versions of features.
+    This class is used when accessing features from a Chronicle object to return
+    windowed versions of the features.
+
+    Attributes
+    ----------
+    subtype : type
+        The type of elements in the array (FeatureSample)
+    level : int
+        The level in the hierarchy (1 for 2D array)
+    nptype : numpy.dtype
+        The numpy data type for the array
+    operations : class
+        Class containing statistical operations
+    """
+    subtype = FeatureSample
+    level = 1
+    nptype = np.float32
+    operations = TradeWindowOps
+
+    @profile
+    def __new__(cls, input_data, name=None, dtype=None, time=None, compressors=None, idx=None):
+        """
+        Create a new FeatureChronicle instance.
+
+        Parameters
+        ----------
+        input_data : array-like
+            Input data to create the FeatureChronicle from
+        name : str, optional
+            Name of the feature, by default None
+        dtype : numpy.dtype, optional
+            Data type for the array, by default None
+        time : array-like, optional
+            Time values for the data, by default None
+        compressors : list, optional
+            List of compression functions, by default None
+        idx : array-like, optional
+            Index values for the data, by default None
+
+        Returns
+        -------
+        FeatureChronicle
+            New FeatureChronicle instance
+        """
+        # Validate input data
+        if input_data is None:
+            raise ValueError("input_data cannot be None")
+        
+        if len(input_data) == 0:
+            raise ValueError("input_data cannot be empty")
+            
+        if not isinstance(input_data, (list, np.ndarray)):
+            raise TypeError(f"input_data must be a list or numpy array, got {type(input_data)}")
+
+        # Initialize compressors if not provided
+        compressors = compressors or []
+        
+        # Handle dtype
+        dtype = np.dtype(dtype) if dtype else np.dtype(cls.nptype)
+        
+        # Convert input data to numpy array
+        if isinstance(input_data[0], cls.subtype):
+            base_data = np.array([np.array(d).view(np.ndarray) for d in input_data], dtype=cls.nptype)
+        else:
+            base_data = np.array(input_data, dtype=cls.nptype)
+        
+        # Create view and set attributes
+        obj = np.array(base_data, dtype=dtype).view(cls)
+        obj.compressors = compressors
+        obj._time = time
+        obj.name = name
+        obj._shape = base_data.shape
+        obj._level = 1
+        obj._idx = idx
+        return obj
+
+    def __array_finalize__(self, obj):
+        """
+        Finalize the array creation process.
+
+        Parameters
+        ----------
+        obj : object
+            Object to finalize
+        """
+        if obj is None: return
+        self.compressors = getattr(obj, 'compressors', [])
+        self._time = getattr(obj, '_time', None)
+        self.name = getattr(obj, 'name', None)
+        self._shape = getattr(obj, '_shape', None)
+        self._level = getattr(obj, '_level', None)
+        self._idx = getattr(obj, '_idx', None)
+
+    def __getitem__(self, item):
+        """
+        Get items from the FeatureChronicle.
+
+        Parameters
+        ----------
+        item : Union[int, slice]
+            Index or slice to get
+
+        Returns
+        -------
+        Union[FeatureSample, FeatureChronicle]
+            Requested data as appropriate type
+        """
+        if isinstance(item, int):
+            # Return a FeatureSample for single index
+            data = self._as_nparray()[item]
+            time_value = self._time[item] if self._time is not None else None
+            return self.subtype(
+                data, name=self.name, 
+                time=time_value, 
+                compressors=self.compressors, 
+                idx=item
+            )
+        elif isinstance(item, slice):
+            # Return a new FeatureChronicle for slices
+            data = self._as_nparray()[item]
+            time_slice = self._time[item] if self._time is not None else None
+            return type(self)(data, name=self.name, time=time_slice, compressors=self.compressors)
+        else:
+            return self._as_nparray()[item]
+
+    def _as_nparray(self):
+        """Return the underlying array data."""
+        return super().__array__()
+
+    def add_compressor(self, compressor, name=None):
+        """
+        Add a compression function to be applied when the compress method is called.
+        """
+        if not callable(compressor):
+            raise TypeError(f"Compressor must be callable, got {type(compressor)}")
+
+        # Handle name assignment
+        if name:
+            compressor.__name__ = name
+        self.compressors.append(compressor)
+        return self
+
+    def compress(self):
+        """
+        Apply all registered compression functions to the data. Each window is compressed
+        creating a new TimeFrame of features. The newly created TimeFrames are then compiled
+        into a new Sample.
+
+        Returns
+        -------
+        Sample
+            Compressed data as a Sample
+        """
+        from .sample import Sample
+        frames = [frame.compress() for frame in self]
+        cols = frames[0]._cols
+        time = self._time[:, 0] if np.any(self._time) else None
+        name = f"{self.name}_{self.shape[1]}_window"
+        # Create a new FeatureSample with compressed data
+        return Sample(frames, cols=cols, time=time, name=name)
+
+    def batch_compress(self, common_operations=True, custom_compressors=None):
+        """
+        Apply a batch of compression operations.
+
+        Parameters
+        ----------
+        common_operations : bool, optional
+            Whether to include common operations, by default True
+        custom_compressors : list, optional
+            List of custom compression functions, by default None
+
+        Returns
+        -------
+        FeatureChronicle
+            Self reference for method chaining
+        """
+        if common_operations:
+            # Create wrapper functions for class methods
+            def wrap_op(op_name):
+                op = getattr(self.operations, op_name)
+                wrapped = lambda x, o=op: o.__get__(None, type(None))(x)
+                wrapped.__name__ = op_name
+                return wrapped
+
+            # Add common statistical operations
+            operations = ["mean", "median", "sum", "std", "min", "max", "skew", "kurtosis", "variance", "first", "last"]
+            for op_name in operations:
+                self.compressors.append(wrap_op(op_name))
+            
+        # Add custom compressors if provided
+        if custom_compressors:
+            for comp in custom_compressors:
+                if callable(comp):
+                    self.compressors.append(comp)
+                elif isinstance(comp, tuple) and len(comp) == 2:
+                    comp_func, comp_name = comp
+                    comp_func.__name__ = comp_name
+                    self.compressors.append(comp_func)
+                    
+        return self
+
+    def _operation_handler(self, operation):
+        data = [operation(frame._as_nparray()) for frame in self]
+        return FeatureSample(data, name=f"{self.name}_{operation.__name__}")
+
+    # Statistical property accessors
+    @property
+    def mean(self):
+        return self._operation_handler(self.operations.mean)
+    
+    @property
+    def std(self):
+        return self._operation_handler(self.operations.std)
+    
+    @property
+    def var(self):
+        return self._operation_handler(self.operations.variance)
+    
+    @property
+    def skew(self):
+        return self._operation_handler(self.operations.skew)
+    
+    @property
+    def kurtosis(self):
+        return self._operation_handler(self.operations.kurtosis)
+    
+    @property
+    def first(self):
+        return self._operation_handler(self.operations.first)
+    
+    @property
+    def last(self):
+        return self._operation_handler(self.operations.last)
+    
+    @property
+    def sum(self):
+        return self._operation_handler(self.operations.sum)
+    
+    @property
+    def min(self):
+        return self._operation_handler(self.operations.min)
+    
+    @property
+    def max(self):
+        return self._operation_handler(self.operations.max)
+    
+    @property
+    def median(self):
+        return self._operation_handler(self.operations.median)

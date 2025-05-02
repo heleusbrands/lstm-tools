@@ -1,6 +1,7 @@
 from __future__ import annotations
 from .base import FrameBase
 from .sample import Sample
+from .feature import FeatureChronicle
 from .utils import *
 from line_profiler import profile
 from typing import TYPE_CHECKING, List, Union
@@ -179,6 +180,20 @@ class Chronicle(FrameBase):
             
             return raw_slice
     
+    def __getattribute__(self, name: str):
+        # First get access to the _cols attribute from the base object
+        # to avoid recursion when accessing self._cols
+        try:
+            cols = super().__getattribute__('_cols')
+            if cols is not None and name in cols:
+                # Get the index using the super implementation to avoid recursion
+                arr = super().__getattribute__('__array__')()
+                idx = cols.index(name)
+                return FeatureChronicle(arr[:,:, idx], name=name, time=self._time)
+        except (AttributeError, ValueError):
+            pass
+        return super().__getattribute__(name)
+
     def __array__(self):
         """Return the underlying array data."""
         return np.array(self).view(np.ndarray)

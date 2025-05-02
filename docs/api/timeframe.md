@@ -187,7 +187,7 @@ time = pd.Timestamp('2023-01-01')
 tf2 = TimeFrame(data, cols=columns, time=time)
 ```
 
-### Accessing Features
+### Accessing FeatureSample
 
 ```python
 # Access features by numerical index

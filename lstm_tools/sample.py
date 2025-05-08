@@ -120,6 +120,10 @@ class Sample(FrameBase):
             cols = list(df.columns) # Update cols
         elif isinstance(input_data, np.ndarray) and len(input_data.shape) == 2: # Handle a 2D array
             input_data = input_data # Update input_data
+        elif isinstance(input_data, list) and isinstance(input_data[0], cls.subtype): # Handle a list of TimeFrames
+            if not time_exists: time = np.array([t._time for t in input_data])
+            if not cols: cols = input_data[0]._cols
+            input_data = np.array(input_data)
         else: # Handle other input types
             raise ValueError(f'Unsupported input type: {type(input_data)}')
 
@@ -245,6 +249,27 @@ class Sample(FrameBase):
         except (AttributeError, ValueError):
             pass
         return super().__getattribute__(name)
+
+    def __add__(self, other):
+        if isinstance(other, Sample):
+            return Sample(
+                np.concatenate([self._as_nparray(), other._as_nparray()], axis=1), 
+                cols=self._cols.extend(other._cols), 
+                time=self._time, 
+                scaler=self.scaler
+            )
+        elif isinstance(other, FeatureSample):
+            return Sample(
+                np.concatenate([self._as_nparray(), np.expand_dims(other._as_nparray(), axis=0)], axis=1), 
+                cols=self._cols.extend(other.name), 
+                time=self._time, 
+                scaler=self.scaler
+            )
+        else:
+            try:
+                super().__add__(other)
+            except:
+                raise ValueError(f"Cannot add {type(other)} to Sample")
 
     @property
     def feature_names(self): return self._cols
@@ -413,6 +438,24 @@ class Sample(FrameBase):
             Chronicle(hw, cols=self._cols, is_gen=True, time=self._time_to_h_sliding_window(), scaler=self.scaler), 
             Chronicle(fw, cols=self._cols, is_gen=True, time=self._time_to_f_sliding_window(), scaler=self.scaler)
             )
+    
+    @classmethod
+    def join_samples_by_window_size(cls, window_size, samples: list):
+        samples = [s for s in samples if s.name.split('_')[1] == str(window_size)]
+        cols = np.array([s._cols for s in samples]).flatten().tolist()
+        data = np.concatenate([np.array(s) for s in samples], axis=1)
+        return Sample(data, cols=cols, time=samples[0]._time, scaler=samples[0].scaler)
+    
+    @classmethod
+    def join_samples(cls, samples: list, remove_window_sizes=True):
+        cols = np.array([s._cols for s in samples]).flatten().tolist()
+        if remove_window_sizes:
+            col_parts = np.array([c.split('_') for c in cols]).flatten()
+            sizes = {p for p in col_parts if p.isdigit()}
+            name = f'compressed_{"".join(sizes)}_window'
+            cols = ['_'.join([x for x in c.split('_') if not x.isdigit()]) for c in cols]
+        data = np.concatenate([np.array(s) for s in samples], axis=1)
+        return Sample(data, cols=cols, time=samples[0]._time, scaler=samples[0].scaler, name=name)
 
     @profile
     def line_plot(self, exclude=None, opacity=0.9):

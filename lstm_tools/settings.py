@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from .base import WindowType
 from .exceptions import InvalidWindowSizeError
-
+import numpy as np
 
 @dataclass
 class WindowSettings:
@@ -70,3 +70,68 @@ class HFWindowSettings:
         # Validate stride when it changes
         if name == 'stride':
             self.validate_stride()
+
+class ExpandingWindowSettings:
+
+    def __init__(self, window_sizes: list[int] = [], window_type: WindowType = WindowType.historical):
+        self.window_sizes = window_sizes
+        self.window_type = window_type
+
+    def __add__(self, other):
+        if isinstance(other, int):
+            self.window_sizes.append(other)
+        elif isinstance(other, list):
+            self.window_sizes.extend(other)
+        else:
+            raise ValueError(f"Cannot add {type(other)} to ExpandingWindowSettings")
+        return self
+    
+    def __iter__(self):
+        return iter(self.window_sizes)
+    
+    def __next__(self):
+        return next(self.window_sizes)
+    
+    def __len__(self):
+        return len(self.window_sizes)
+    
+    def __getitem__(self, index):
+        return self.window_sizes[index]
+    
+    def __setitem__(self, index, value):
+        self.window_sizes[index] = value
+    
+    def __delitem__(self, index):
+        del self.window_sizes[index]
+    
+    def __contains__(self, item):
+        return item in self.window_sizes
+    
+    def _get_window(self, window_size: int, array: np.ndarray):
+        if self.window_type == WindowType.historical:
+            return array[-window_size:]
+        else:
+            return array[:window_size]
+        
+    def _get_window_array(self, window_size: int, array: np.ndarray):
+        if self.window_type == WindowType.historical:
+            return array[:, -window_size:]
+        else:
+            return array[:, :window_size]
+    
+    def _get_windows(self, array: np.ndarray):
+        return [self._get_window(window_size, array) for window_size in self.window_sizes]
+    
+    def _get_window_arrays(self, array: np.ndarray):
+        return [self._get_window_array(window_size, array) for window_size in self.window_sizes]
+    
+    def __call__(self, array: np.ndarray):
+        if len(array.shape) == 1:
+            return self._get_windows(array)
+        else:
+            return self._get_window_arrays(array)
+    
+    
+    
+    
+    

@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="lstm-tools",
-    version="0.2.0",
+    version="0.3.0",
     author="Rose Bloom Research Co",
     author_email="rosebloomresearch@gmail.com",
     description="A high-performance library for dynamically handling sequential data",

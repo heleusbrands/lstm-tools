@@ -106,16 +106,17 @@ class Chronicle(FrameBase):
         
         # Create a view of the base data and store the data directly in the view
         obj = np.array(base_data, dtype=dtype).view(cls)
-        obj._time = time
+        
         
         # Infer shape from the data
         obj._shape = base_data.shape
-            
+        obj._time = time    
         obj._cols = cols
         obj._idx = idx
         obj._level = 0
         obj.scaler = scaler
         obj.name = name
+        obj.compressors = Storage(**{col: [] for col in cols})
         obj.is_gen = is_gen
         return obj
     
@@ -139,10 +140,11 @@ class Chronicle(FrameBase):
         Union[Sample, np.ndarray]
             Chronicle data based on the input type.
         """
+        from .feature import FeatureSample, FeatureChronicle
         if isinstance(item, str):
             # Get by column name
             idx = self._cols.index(item)
-            return np.array(self).view(np.ndarray)[:, :, idx] if len(self._shape) == 3 else np.array(self).view(np.ndarray)[:, idx]
+            return FeatureChronicle(np.array(self).view(np.ndarray)[:, :, idx], name=item, time=self._time, compressors = self.compressors[item]) if len(self._shape) == 3 else FeatureSample(np.array(self).view(np.ndarray)[:, idx], name=item, time=self._time)
         elif isinstance(item, int):
             # Get by numeric index - return a Sample
             if not (0 <= item < len(self)):
@@ -189,7 +191,7 @@ class Chronicle(FrameBase):
                 # Get the index using the super implementation to avoid recursion
                 arr = super().__getattribute__('__array__')()
                 idx = cols.index(name)
-                return FeatureChronicle(arr[:,:, idx], name=name, time=self._time)
+                return FeatureChronicle(arr[:,:, idx], name=name, time=self._time, compressors = self.compressors[name])
         except (AttributeError, ValueError):
             pass
         return super().__getattribute__(name)
@@ -214,10 +216,15 @@ class Chronicle(FrameBase):
         self._cols = getattr(obj, '_cols', None)
         self._idx = getattr(obj, '_idx', None)
         self._level = getattr(obj, '_level', None)
+        self.compressors = getattr(obj, 'compressors', None)
         self.scaler = getattr(obj, 'scaler', None)
         self.name = getattr(obj, 'name', None)
         self.is_gen = getattr(obj, 'is_gen', False)
-    
+
+    @property
+    def features(self):
+        return [self[c] for c in self._cols]
+
     @classmethod
     @profile
     def merge_samples_to_chronicle(cls, samples: List['Sample']) -> 'Chronicle':
@@ -258,7 +265,7 @@ class Chronicle(FrameBase):
         time = samples[0]._time
         
         # Use cols from first sample
-        cols = samples[0]._cols
+        cols = ['_'.join(c.split('_')) for c in samples[0]._cols] if '_' in samples[0]._cols[0] else samples[0]._cols
         
         # Use scaler from first sample if it exists
         scaler = getattr(samples[0], 'scaler', None)
@@ -425,6 +432,10 @@ class Chronicle(FrameBase):
             results.append(method(feature_data))
         
         return np.array(results)
+    
+    def compress_all_features(self):
+        compressed_features = [f.compress() for f in self.features]
+        return compressed_features
 
     @profile
     def batch_compress(self, features=None, methods=None):

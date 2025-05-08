@@ -4,7 +4,8 @@ import os
 from typing import List
 import datetime
 import statistics as st
-
+from collections import UserDict
+from typing import Any
 
 def verify_dataset(dataset, samples, sequence_length):
     """
@@ -354,6 +355,44 @@ def skew(arr):
     n = len(arr)
     return np.sum(standardized_arr**3) / n
 
+class Storage(UserDict): # CHECKED
+    """
+    A dictionary-like class that allows attribute-style access to its items.
+    
+    This class extends UserDict to provide a more intuitive way to access dictionary
+    items as attributes, allowing for both dictionary-style and attribute-style access.
+    
+    Examples:
+        storage = Storage()
+        storage['key'] = value  # Dictionary-style access
+        storage.key = value     # Attribute-style access
+        value = storage.key     # Attribute-style access
+    
+    Attributes:
+        data (dict): The underlying dictionary storing the data.
+    
+    Methods:
+        __setattr__: Sets an attribute or dictionary item.
+        __getattr__: Gets an attribute or dictionary item.
+    """
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+    
+    def __setattr__(self, name: str, value: Any) -> None:
+        # Handle special attributes (like 'data') normally
+        if name == "data" or name.startswith('_'):
+            super().__setattr__(name, value)
+        else:
+            # Store other attributes in the internal dictionary
+            self.data[name] = value
+    
+    def __getattr__(self, name: str) -> Any:
+        # This is only called if the attribute wasn't found through normal means
+        # Avoid infinite recursion by not using self.data.get()
+        if name in self.data:
+            return self.data[name]
+        # Raise AttributeError for missing attributes (standard behavior)
+        raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{name}'")
 
 class TradeWindowOps:
 

@@ -3,6 +3,7 @@ import pandas as pd
 from line_profiler import profile
 from .base import FrameBase
 from .utils import TradeWindowOps
+from .settings import ExpandingWindowSettings
 from typing import Union, List, Callable, Any, Optional, TypeVar
 
 
@@ -170,7 +171,7 @@ class FeatureSample(FrameBase):
         data = self._as_nparray()
         feats = [comp(data) for comp in self.compressors]
         cols = [f"{self.name}_{comp.__name__}" for comp in self.compressors]
-        return TimeFrame(feats, cols=cols, time=self._time[0] if self._time else None)
+        return TimeFrame(feats, cols=cols, time=self._time[0] if np.any(self._time) else None)
     
     def batch_compress(self, common_operations=True, custom_compressors=None):
         """
@@ -215,6 +216,27 @@ class FeatureSample(FrameBase):
                     self.add_compressor(comp[0], comp[1])
                     
         return self
+    
+    def line_plot(self, opacity=0.9):
+        try:
+            import plotly.graph_objects as go
+        except ImportError:
+            raise ImportError("Please install plotly using: pip install plotly")
+        
+        fig = go.Figure()
+        
+        fig.add_trace(go.Scatter(x=self._time, y=self._as_nparray(), mode='lines', name=self.name, opacity=opacity, line=dict(width=2)))
+
+        # Update layout
+        fig.update_layout(
+            title=f'{self.name} Line Plot',
+            xaxis_title='Time' if np.any(self._time) else 'Index',
+            yaxis_title=self.name,
+            showlegend=True,
+        )
+        
+        fig.show()
+        
     
     @property
     def mean(self):
@@ -332,9 +354,10 @@ class FeatureChronicle(FrameBase):
         
         # Create view and set attributes
         obj = np.array(base_data, dtype=dtype).view(cls)
+        obj.subwindow_settings = ExpandingWindowSettings()
         obj.compressors = compressors
         obj._time = time
-        obj.name = name
+        obj.name = name + f"_{obj.shape[1]}"
         obj._shape = base_data.shape
         obj._level = 1
         obj._idx = idx
@@ -405,6 +428,19 @@ class FeatureChronicle(FrameBase):
             compressor.__name__ = name
         self.compressors.append(compressor)
         return self
+    
+    def get_subwindows(self):
+        windows = self.subwindow_settings(self._as_nparray())
+        names = [f"{self.name.split('_')[0]}" for _ in self.subwindow_settings]
+        return [FeatureChronicle(window, name=name, compressors=self.compressors) for window, name in zip(windows, names)]
+    
+    def compress_all(self):
+        windows = self.get_subwindows()
+        windows.insert(0, self)
+        return [window.compress() for window in windows]
+    
+    def get_sample_by_window_size(self, window_size, samples: list):
+        return [s for s in samples if s.name.split('_')[1] == str(window_size)]
 
     def compress(self):
         """
@@ -421,9 +457,9 @@ class FeatureChronicle(FrameBase):
         frames = [frame.compress() for frame in self]
         cols = frames[0]._cols
         time = self._time[:, 0] if np.any(self._time) else None
-        name = f"{self.name}_{self.shape[1]}_window"
+        name = f"{self.name.split('_')[0]}_{self.shape[1]}_window"
         # Create a new FeatureSample with compressed data
-        return Sample(frames, cols=cols, time=time, name=name)
+        return Sample(np.array(frames), cols=cols, time=time, name=name)
 
     def batch_compress(self, common_operations=True, custom_compressors=None):
         """

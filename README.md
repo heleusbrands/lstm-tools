@@ -164,6 +164,7 @@ tf_tensor = sample.to_tfTensor()
 ```
 
 ## Chronicle Compression - Quick Example
+
 ```python
 
 from lstm_tools import Sample

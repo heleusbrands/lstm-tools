@@ -68,7 +68,8 @@ class Sample(FrameBase):
         dtype=None,
         use_scaler: bool = False,
         scaler = None,
-        time = None
+        time = None,
+        source: FrameBase = None
         ):
 
         def scaler_handler(input_data, scaler):
@@ -158,6 +159,8 @@ class Sample(FrameBase):
         obj.scaler = scaler
         obj.name = name
         obj.window_settings = HFWindowSettings()
+
+        if np.any(source): cls.__load_metadata__(source, obj)
         return obj
     
     @profile
@@ -325,7 +328,10 @@ class Sample(FrameBase):
         pd.DataFrame
             Sample data as a pandas DataFrame.
         """
-        return pd.DataFrame(np.array(self).view(np.ndarray), columns=self._cols)
+        cols = self._cols
+        df = pd.DataFrame(np.array(self).view(np.ndarray), columns=self._cols)
+        df.insert(0, 'time', self._time)
+        return df
 
     @profile
     def _time_to_sliding_window(self):
@@ -435,8 +441,8 @@ class Sample(FrameBase):
         data = np.array(self).view(np.ndarray)
         hw, fw = hf_sliding_window(data, hws, fws, slide)
         return (
-            Chronicle(hw, cols=self._cols, is_gen=True, time=self._time_to_h_sliding_window(), scaler=self.scaler), 
-            Chronicle(fw, cols=self._cols, is_gen=True, time=self._time_to_f_sliding_window(), scaler=self.scaler)
+            Chronicle(hw, cols=self._cols, is_gen=True, time=self._time_to_h_sliding_window(), scaler=self.scaler, source=self), 
+            Chronicle(fw, cols=self._cols, is_gen=True, time=self._time_to_f_sliding_window(), scaler=self.scaler, source=self)
             )
     
     @classmethod
@@ -534,7 +540,7 @@ class Sample(FrameBase):
         None
         """
         df = self.to_DataFrame()
-        df.to_csv(path)
+        df.to_csv(path, index=False)
 
     @profile
     def save(self, path, format='pickle'):

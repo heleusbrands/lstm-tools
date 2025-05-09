@@ -34,8 +34,6 @@ class Chronicle(FrameBase):
         Whether the chronicle is generated, by default False.
     scaler : sklearn.preprocessing.RobustScaler, optional
         Scaler used for the chronicle, by default None.
-    preserve_base : bool, optional
-        Whether to preserve the base data, by default True.
     time : np.ndarray, optional
         Time values for the chronicle, by default None.
 
@@ -62,8 +60,8 @@ class Chronicle(FrameBase):
         dtype=None, 
         is_gen = False, 
         scaler = None, 
-        preserve_base = True,
-        time = None
+        time = None,
+        source: FrameBase = None
         ):
         
         # Validate input data
@@ -86,7 +84,10 @@ class Chronicle(FrameBase):
         # Create a new instance of the array
         if cls.subtype != Sample: cls.subtype = Sample
         dtype = np.dtype(dtype) if dtype else np.dtype(cls.nptype)
-        scaler = scaler or getattr(input_data[0], 'scaler', None) if isinstance(input_data, (list, tuple)) and len(input_data) > 0 else None
+        if scaler:
+            scaler = scaler
+        else: 
+            scaler = getattr(input_data[0], 'scaler', None) if isinstance(input_data, (list, tuple)) and len(input_data) > 0 else None
         
         # Prepare data to store directly in the array view
         if isinstance(input_data[0], cls.subtype): 
@@ -118,6 +119,8 @@ class Chronicle(FrameBase):
         obj.name = name
         obj.compressors = Storage(**{col: [] for col in cols})
         obj.is_gen = is_gen
+
+        if np.any(source): cls.__load_metadata__(source, obj)
         return obj
     
     @profile
@@ -433,6 +436,16 @@ class Chronicle(FrameBase):
         
         return np.array(results)
     
+    
+    def squeeze(self):
+        """
+        Attempt to sqeeze the Chronicle to a Sample object.
+        """
+        if len(self._shape) == 3:
+            return self.subtype(self, self._cols, is_gen=self.is_gen, time=self._time, scaler=self.scaler)
+        else:
+            return self
+
     def compress_all_features(self):
         compressed_features = [f.compress() for f in self.features]
         return compressed_features

@@ -55,7 +55,8 @@ class TimeFrame(FrameBase):
                 idx=None, 
                 name=None,
                 dtype=None,
-                time = None
+                time = None,
+                source: FrameBase = None
                 ): #TODO: Change this to no longer be a ndarray subclass, but rather a wrapper that includes an __array__ method
         # Create a new instance of the array
 
@@ -81,6 +82,8 @@ class TimeFrame(FrameBase):
         obj._idx = idx
         obj._level = 0
         obj._original_input = input_data  # Store original if needed for reference
+
+        if np.any(source): cls.__load_metadata__(source, obj)
         return obj
 
     @profile

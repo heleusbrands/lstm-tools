@@ -51,3 +51,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Issues
 - Need to update the documentation to reflect the new changes.
+
+## [0.3.2] - 2025-05
+
+### Changed
+- Fixed Issue with scaler not being adopted properly by the Chronicle class
+
+### Added
+- New MetaData base class to help with passing information back and forth between class type
+- New custom squeeze() method added to Chronicle class to handle converting instances with an extra unneeded dimension back to Sample
+- Added the parameter "source" to all FrameBase subclass's __new__ methods, to allow for obtaining MetaData objects
+
+### Issues
+- Need to update the documentation to reflect the new changes.

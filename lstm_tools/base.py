@@ -3,6 +3,9 @@ import plotly.graph_objects as go
 import plotly.io as pio
 from enum import Enum
 import numpy as np
+from collections import UserDict
+from typing import Any
+
 
 # Create a custom template
 my_template = go.layout.Template(
@@ -21,6 +24,41 @@ my_template = go.layout.Template(
 pio.templates["bayesian"] = my_template
 pio.templates.default = "bayesian"
 
+class MetaData(UserDict): # CHECKED
+    """
+    A dictionary-like class used to automatically find and store common metadata to be shared across classes.
+    
+    Attributes:
+        data (dict): The underlying dictionary storing the data.
+    
+    Methods:
+        __setattr__: Sets an attribute or dictionary item.
+        __getattr__: Gets an attribute or dictionary item.
+    """
+    def __init__(self, obj: Any):
+        super().__init__()
+        if hasattr(obj, '_cols'): self['_cols'] = obj._cols
+        if hasattr(obj, '_idx'): self['_idx'] = obj._idx
+        if hasattr(obj, '_level'): self['_level'] = obj._level
+        if hasattr(obj, '_shape'): self['_shape'] = obj._shape
+        if hasattr(obj, 'scaler'): self['scaler'] = obj.scaler
+    
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        # Handle special attributes (like 'data') normally
+        if name == "data" or name.startswith('_'):
+            super().__setattr__(name, value)
+        else:
+            # Store other attributes in the internal dictionary
+            self.data[name] = value
+    
+    def __getattr__(self, name: str) -> Any:
+        # This is only called if the attribute wasn't found through normal means
+        # Avoid infinite recursion by not using self.data.get()
+        if name in self.data:
+            return self.data[name]
+        # Raise AttributeError for missing attributes (standard behavior)
+        raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{name}'")
 
 class WindowType(Enum):
     """
@@ -98,6 +136,23 @@ class FrameBase(np.ndarray):
         self._idx = getattr(obj, '_idx', None)
         self._level = getattr(obj, '_level', 0)
         self._shape = getattr(obj, '_shape', None)
+
+    def __get_metadata__(self):
+        return MetaData(self)
+
+    @classmethod
+    def __load_metadata__(cls, metaobj: Any, obj: Any):
+        if not hasattr(metaobj, '__get_metadata__'):
+            return
+        meta = metaobj.__get_metadata__()
+        for key, value in meta.items():
+            if not hasattr(obj, key) and not getattr(obj, key, None):
+                if key == '_shape' and hasattr(obj, 'shape'):
+                    obj._shape = obj.shape
+                    continue
+                setattr(obj, key, value)
+
+            
 
     @property
     def shape(self):

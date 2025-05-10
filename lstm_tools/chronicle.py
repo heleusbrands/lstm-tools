@@ -442,7 +442,7 @@ class Chronicle(FrameBase):
         Attempt to sqeeze the Chronicle to a Sample object.
         """
         if len(self._shape) == 3:
-            return self.subtype(self, self._cols, is_gen=self.is_gen, time=self._time, scaler=self.scaler)
+            return self.subtype(self, self._cols, time=self._time, scaler=self.scaler)
         else:
             return self
 

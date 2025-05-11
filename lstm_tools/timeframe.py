@@ -181,6 +181,12 @@ class TimeFrame(FrameBase):
     @property
     def feature_names(self): return self._cols
 
+    @property
+    def time(self): return self._time
+
+    def to_numpy(self):
+        return self.__array__()
+
     @profile
     def to_ptTensor(self, device = 'cpu'):
         """

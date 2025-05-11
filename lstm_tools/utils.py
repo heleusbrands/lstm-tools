@@ -159,7 +159,7 @@ def weighted_average_right_np(data, weights_type='linear', custom_weights_func=N
     normalized_weights = weights / sum_weights
     return np.sum(data * normalized_weights)
 
-def sliding_window(arr, window_size, step_size=1):
+def sliding_window(arr, window_size, step_size=1, offset=0):
     """
     Create a sliding window view of the input data.
 
@@ -177,6 +177,10 @@ def sliding_window(arr, window_size, step_size=1):
     np.ndarray
         Array containing the sliding window views.
     """
+    if offset > 0:
+        arr = arr[offset:]
+    if offset < 0:
+        arr = arr[:offset]
     # Pre-calculate the shape and strides for better performance
     n_windows = ((arr.shape[0] - window_size) // step_size) + 1
     window_shape = (n_windows, window_size) + arr.shape[1:]
@@ -187,57 +191,126 @@ def sliding_window(arr, window_size, step_size=1):
     # Create the view directly without intermediate copies
     return np.lib.stride_tricks.as_strided(arr, shape=window_shape, strides=new_strides, writeable=False)
 
-def hf_sliding_window(arr, historical_size, future_size, step_size=1):
+def hf_sliding_window(arr, historical_size, future_size, future_offset=0, step_size=1):
     """
     Create historical and future sliding window views of the input data.
 
     Parameters
     ----------
-    arr : np.ndarray
-        Input array to create windows from.
+    arr : np.ndarray or array-like
+        Input array to create windows from. Windowing is performed on the first axis.
     historical_size : int
-        Size of the historical window.
+        Size of the historical window (number of elements along the first axis).
     future_size : int
-        Size of the future window.
+        Size of the future window (number of elements along the first axis).
+    future_offset : int, optional
+        Offset for the start of the future window relative to the end of the
+        historical window. A positive value starts the future window later,
+        a negative value starts it earlier. Default is 0, meaning the future
+        window starts immediately after the historical window.
+        Specifically, the k-th future window will start at an index relative
+        to the start of the k-th historical window by:
+        `start_historical_k + historical_size + future_offset`.
     step_size : int, optional
-        Step size between consecutive windows, by default 1.
+        Step size between consecutive windows (number of elements along the first axis),
+        by default 1.
 
     Returns
     -------
     Tuple[np.ndarray, np.ndarray]
         Tuple containing (historical_windows, future_windows).
+        The first dimension of each returned array is the number of windows.
+        Subsequent dimensions match the window size and the remaining dimensions
+        of the input array.
+
+    Raises
+    ------
+    ValueError
+        If historical_size, future_size, or step_size are not positive.
+        If `historical_size + future_offset` is negative, meaning the future
+        window would need to start before the beginning of the input array.
     """
-    # Calculate total required length
-    total_size = historical_size + future_size
-    if len(arr) < total_size:
-        raise ValueError(f"Array length {len(arr)} is less than total window size {total_size}")
-    
-    # Calculate number of windows
-    n_windows = ((len(arr) - total_size) // step_size) + 1
-    
-    # Pre-allocate the arrays with the correct shape
+    if not isinstance(arr, np.ndarray):
+        arr = np.array(arr)
+
+    if arr.ndim == 0:
+        raise ValueError("Input array cannot be a scalar.")
+    if historical_size <= 0:
+        raise ValueError("historical_size must be positive.")
+    if future_size <= 0:
+        raise ValueError("future_size must be positive.")
+    if step_size <= 0:
+        raise ValueError("step_size must be positive.")
+
+    # The k-th historical window starts at index `k * step_size`.
+    # The k-th future window is intended to start at index `k * step_size + historical_size + future_offset`.
+    # Thus, the data for the first future window (k=0) starts at original array index `historical_size + future_offset`.
+    # This starting index must be non-negative.
+    future_data_array_start_idx = historical_size + future_offset
+    if future_data_array_start_idx < 0:
+        raise ValueError(
+            f"The effective start index for future windows in the base array "
+            f"(historical_size + future_offset = {future_data_array_start_idx}) "
+            f"cannot be negative."
+        )
+
+    # Determine the maximum extent reached by any single pair of (historical, future) windows
+    # relative to the start of the historical window. This is used to calculate n_windows.
+    # End of historical window (exclusive): historical_size
+    # End of future window (exclusive): historical_size + future_offset + future_size
+    max_reach_from_window_start = max(historical_size, future_data_array_start_idx + future_size)
+
+    # Calculate the number of complete (historical, future) window pairs that can be formed.
+    # The available length for sliding is `arr.shape[0] - max_reach_from_window_start`.
+    if arr.shape[0] < max_reach_from_window_start:
+        num_possible_steps_for_sliding = -1 # Not enough data for even one full pair
+    else:
+        num_possible_steps_for_sliding = arr.shape[0] - max_reach_from_window_start
+
+    if num_possible_steps_for_sliding < 0:
+        n_windows = 0
+    else:
+        n_windows = (num_possible_steps_for_sliding // step_size) + 1
+
+    # If no windows can be formed, return empty arrays with appropriate shapes.
+    if n_windows <= 0:
+        # Shape: (0, window_size_dim0, ...other_dims...)
+        empty_hist_shape = (0, historical_size) + arr.shape[1:]
+        empty_fut_shape = (0, future_size) + arr.shape[1:]
+        return np.empty(empty_hist_shape, dtype=arr.dtype), np.empty(empty_fut_shape, dtype=arr.dtype)
+
+    # Define the shape of the resulting window arrays
     hist_shape = (n_windows, historical_size) + arr.shape[1:]
     fut_shape = (n_windows, future_size) + arr.shape[1:]
-    
-    # Create strided views for both historical and future windows simultaneously
-    hist_strides = (arr.strides[0] * step_size,) + arr.strides
-    fut_strides = hist_strides
-    
-    # Create the views directly
+
+    # Define the strides for the window arrays
+    # Strides: (bytes_to_next_window_start, bytes_to_next_element_in_window_dim0, ...strides_for_other_dims...)
+    base_element_strides = arr.strides
+    # Stride for the first dimension (stepping between windows)
+    window_step_stride_bytes = base_element_strides[0] * step_size
+
+    hist_strides = (window_step_stride_bytes,) + base_element_strides
+    # Future windows step through the array in the same way, so strides structure is similar
+    fut_strides = (window_step_stride_bytes,) + base_element_strides
+
     historical_windows = np.lib.stride_tricks.as_strided(
-        arr, 
+        arr,
         shape=hist_shape,
         strides=hist_strides,
         writeable=False
     )
-    
+
+    # The future windows are formed from a view of the original array that starts
+    # at `future_data_array_start_idx`.
+    future_array_base_view = arr[future_data_array_start_idx:]
+
     future_windows = np.lib.stride_tricks.as_strided(
-        arr[historical_size:], 
+        future_array_base_view,
         shape=fut_shape,
-        strides=fut_strides,
+        strides=fut_strides, # Strides are relative to the memory layout of `arr` (and `future_array_base_view` shares it)
         writeable=False
     )
-    
+
     return historical_windows, future_windows
 
 def subwindow(arr, subwindow_size, direction="backward"):

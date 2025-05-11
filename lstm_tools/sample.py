@@ -277,12 +277,18 @@ class Sample(FrameBase):
     @property
     def feature_names(self): return self._cols
 
+    @property
+    def time(self): return self._time
+
     def rename_columns(self, new_names: List[str]):
         """
         Rename the columns of the Sample.
         """
         self._cols = new_names
         return self
+
+    def to_numpy(self):
+        return self.__array__()
 
     @profile
     def to_ptTensor(self, device = 'cpu'):
@@ -334,7 +340,7 @@ class Sample(FrameBase):
         return df
 
     @profile
-    def _time_to_sliding_window(self):
+    def _time_to_hf_sliding_window(self):
         """
         Create a sliding window view of the time data.
 
@@ -344,9 +350,12 @@ class Sample(FrameBase):
             Sliding window view of the time data.
         """
         if not bool(np.any(self._time)): return None
-        ws = self.window_settings.future.window_size
-        slide = self.window_settings.stride
-        return np.lib.stride_tricks.sliding_window_view(self._time, window_shape=ws)[::slide]
+        fsize = self.window_settings.future.size
+        hsize = self.window_settings.historical.size
+        foffset = self.window_settings.future.offset
+        step = self.window_settings.stride
+        h, f = hf_sliding_window(self._time, hsize, fsize, foffset, step)
+        return h, f
 
     @profile
     def _time_to_h_sliding_window(self):
@@ -355,14 +364,16 @@ class Sample(FrameBase):
 
         Returns
         -------
-        np.ndarray
-            Historical sliding window view of the time data.
+        Tuple[np.ndarray, np.ndarray]
+            Tuple containing (historical_windows, future_windows).
         """
         if not bool(np.any(self._time)): return None
-        fws = self.window_settings.future.window_size
-        hws = self.window_settings.historical.window_size
-        slide = self.window_settings.stride
-        return np.lib.stride_tricks.sliding_window_view(self._time[:len(self) - fws], window_shape=hws)[::slide]
+        fsize = self.window_settings.future.size
+        hsize = self.window_settings.historical.size
+        foffset = self.window_settings.future.offset
+        step = self.window_settings.stride
+        h, _ = hf_sliding_window(self._time, hsize, fsize, foffset, step)
+        return h
 
     @profile
     def _time_to_f_sliding_window(self):
@@ -375,10 +386,12 @@ class Sample(FrameBase):
             Future sliding window view of the time data.
         """
         if not bool(np.any(self._time)): return None
-        fws = self.window_settings.future.window_size
-        hws = self.window_settings.historical.window_size
-        slide = self.window_settings.stride
-        return np.lib.stride_tricks.sliding_window_view(self._time[hws:], window_shape=fws)[::slide]
+        fsize = self.window_settings.future.size
+        hsize = self.window_settings.historical.size
+        foffset = self.window_settings.future.offset
+        step = self.window_settings.stride
+        _, f = hf_sliding_window(self._time, hsize, fsize, foffset, step)
+        return f
     
     @profile
     def future_sliding_window(self) -> 'Chronicle':
@@ -391,14 +404,17 @@ class Sample(FrameBase):
             Sliding window view of the Sample.
         """
         from .chronicle import Chronicle
-        ws = self.window_settings.future.window_size
-        slide = self.window_settings.stride
+        hsize = self.window_settings.historical.size
+        fsize = self.window_settings.future.size
+        foffset = self.window_settings.future.offset
+        step = self.window_settings.stride
         data = np.array(self).view(np.ndarray)
+        h, f = hf_sliding_window(data, hsize, fsize, foffset, step)
         return Chronicle(
-            sliding_window(data[self.window_settings.historical.window_size:], ws, slide), 
+            f, 
             cols=self._cols, 
             is_gen=True, 
-            time = self._time_to_sliding_window(), 
+            time = self._time_to_f_sliding_window(), 
             scaler=self.scaler
             )
 
@@ -413,11 +429,14 @@ class Sample(FrameBase):
             Historical sliding window view of the Sample.
         """
         from .chronicle import Chronicle
-        ws = self.window_settings.historical.window_size
-        slide = self.window_settings.stride
+        hsize = self.window_settings.historical.size
+        fsize = self.window_settings.future.size
+        foffset = self.window_settings.future.offset
+        step = self.window_settings.stride
         data = np.array(self).view(np.ndarray)
+        h, _ = hf_sliding_window(data, hsize, fsize, foffset, step)
         return Chronicle(
-            sliding_window(data[:len(self) - self.window_settings.future.window_size], ws, slide), 
+            h, 
             cols=self._cols, 
             is_gen=True, 
             time = self._time_to_h_sliding_window(), 
@@ -435,14 +454,16 @@ class Sample(FrameBase):
             Tuple containing (historical_windows, future_windows).
         """
         from .chronicle import Chronicle
-        fws = self.window_settings.future.window_size
-        hws = self.window_settings.historical.window_size
-        slide = self.window_settings.stride
+        hsize = self.window_settings.historical.size
+        fsize = self.window_settings.future.size
+        foffset = self.window_settings.future.offset
+        step = self.window_settings.stride
         data = np.array(self).view(np.ndarray)
-        hw, fw = hf_sliding_window(data, hws, fws, slide)
+        ht, ft = self._time_to_hf_sliding_window()
+        h, f = hf_sliding_window(data, hsize, fsize, foffset, step)
         return (
-            Chronicle(hw, cols=self._cols, is_gen=True, time=self._time_to_h_sliding_window(), scaler=self.scaler, source=self), 
-            Chronicle(fw, cols=self._cols, is_gen=True, time=self._time_to_f_sliding_window(), scaler=self.scaler, source=self)
+            Chronicle(h, cols=self._cols, is_gen=True, time=ht, scaler=self.scaler, source=self), 
+            Chronicle(f, cols=self._cols, is_gen=True, time=ft, scaler=self.scaler, source=self)
             )
     
     @classmethod
@@ -996,11 +1017,11 @@ class Sample(FrameBase):
         
         # Configure window settings if provided
         if lookback is not None:
-            self.window_settings.historical.window_size = lookback
+            self.window_settings.historical.size = lookback
             logger.info(f"Historical window size set to {lookback}")
         
         if forecast is not None:
-            self.window_settings.future.window_size = forecast
+            self.window_settings.future.size = forecast
             logger.info(f"Future window size set to {forecast}")
         
         # Create windows

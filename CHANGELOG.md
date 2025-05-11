@@ -64,3 +64,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Issues
 - Need to update the documentation to reflect the new changes.
+
+## [0.3.4] - 2025-05
+
+### Changed
+- Fixed error when squeezing a Chronicle with an empty dimension.
+
+### Added
+- `time` property added to the `TimeFrame`, `Sample`, and `Chronicle` classes.
+- Added more robust window settings, with the addition of an `offset` setting for offsetting a future window from the historical.
+- Improved the `hf_sliding_window`method, within the `utils` module, to account for the new `offset` window setting and updated the Sample class.
+
+### Issues
+- Need to update the documentation to reflect the new changes.

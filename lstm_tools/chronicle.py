@@ -228,6 +228,12 @@ class Chronicle(FrameBase):
     def features(self):
         return [self[c] for c in self._cols]
 
+    @property
+    def time(self): return self._time
+
+    @property
+    def feature_names(self): return self._cols
+
     @classmethod
     @profile
     def merge_samples_to_chronicle(cls, samples: List['Sample']) -> 'Chronicle':
@@ -274,6 +280,9 @@ class Chronicle(FrameBase):
         scaler = getattr(samples[0], 'scaler', None)
         
         return cls(base_data, cols=cols, time=time, scaler=scaler)
+
+    def to_numpy(self):
+        return self.__array__()
 
     @profile
     def to_ptTensor(self, device = 'cpu'):
@@ -442,7 +451,7 @@ class Chronicle(FrameBase):
         Attempt to sqeeze the Chronicle to a Sample object.
         """
         if len(self._shape) == 3:
-            return self.subtype(self, self._cols, time=self._time, scaler=self.scaler)
+            return self.subtype(self.to_numpy().squeeze(), self._cols, time=self._time.squeeze(), scaler=self.scaler)
         else:
             return self
 

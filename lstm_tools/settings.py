@@ -16,15 +16,16 @@ class WindowSettings:
         Size of the window in time steps.
     """
     window_type: WindowType = WindowType.future
-    window_size: int = 10  # Changed from 60 to a more reasonable default
+    size: int = 10  # Changed from 60 to a more reasonable default
+    offset: int = 0
     
     def __post_init__(self):
         self.validate_window_size()
         
     def validate_window_size(self):
         """Validate that window size is positive."""
-        if self.window_size <= 0:
-            raise InvalidWindowSizeError(f"Window size must be positive, got {self.window_size}")
+        if self.size <= 0:
+            raise InvalidWindowSizeError(f"Window size must be positive, got {self.size}")
             
     def __setattr__(self, name, value):
         """Custom attribute setter with validation."""
@@ -51,7 +52,7 @@ class HFWindowSettings:
         Step size between consecutive windows.
     """
     historical: WindowSettings = field(default_factory=lambda: WindowSettings(window_type=WindowType.historical))
-    future: WindowSettings = field(default_factory=lambda: WindowSettings(window_type=WindowType.future, window_size=1))
+    future: WindowSettings = field(default_factory=lambda: WindowSettings(window_type=WindowType.future, size=1))
     stride: int = 1
     
     def __post_init__(self):

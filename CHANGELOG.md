@@ -99,3 +99,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Issues
 - Need to update the documentation to reflect the new changes.
+
+## [0.3.7] - 2025-05
+
+### Changed
+- Fixed an error with the Sample class method `fromFeatureSample` incorrectly passing scaler to Sample instance. Added `scaler` arguement.
+
+### Issues
+- Need to update the documentation to reflect the new changes.

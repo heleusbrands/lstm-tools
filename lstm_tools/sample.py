@@ -1063,7 +1063,7 @@ class Sample(FrameBase):
             return X, y, X_time, y_time
         
     @classmethod
-    def from_FeatureSamples(cls, feature_samples: List[FeatureSample]):
+    def from_FeatureSamples(cls, feature_samples: List[FeatureSample], scaler=None):
         lengths = [len(fs) for fs in feature_samples]
         if not all(length == lengths[0] for length in lengths):
             raise ValueError("All feature samples must have the same length")
@@ -1073,6 +1073,6 @@ class Sample(FrameBase):
             np.stack([f._as_nparray() for f in feature_samples], axis=1), 
             cols=[f.name for f in feature_samples], 
             time=feature_samples[0]._time,
-            scaler=feature_samples[0].scaler
+            scaler=scaler
         )
         

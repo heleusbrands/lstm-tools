@@ -371,8 +371,9 @@ class Sample(FrameBase):
         fsize = self.window_settings.future.size
         hsize = self.window_settings.historical.size
         foffset = self.window_settings.future.offset
+        hspacing = self.window_settings.historical.spacing
         step = self.window_settings.stride
-        h, _ = hf_sliding_window(self._time, hsize, fsize, foffset, step)
+        h, _ = hf_sliding_window(self._time, hsize, fsize, foffset, hspacing, step)
         return h
 
     @profile
@@ -389,8 +390,9 @@ class Sample(FrameBase):
         fsize = self.window_settings.future.size
         hsize = self.window_settings.historical.size
         foffset = self.window_settings.future.offset
+        hspacing = self.window_settings.historical.spacing
         step = self.window_settings.stride
-        _, f = hf_sliding_window(self._time, hsize, fsize, foffset, step)
+        _, f = hf_sliding_window(self._time, hsize, fsize, foffset, hspacing, step)
         return f
     
     @profile
@@ -407,9 +409,10 @@ class Sample(FrameBase):
         hsize = self.window_settings.historical.size
         fsize = self.window_settings.future.size
         foffset = self.window_settings.future.offset
+        hspacing = self.window_settings.historical.spacing
         step = self.window_settings.stride
         data = np.array(self).view(np.ndarray)
-        h, f = hf_sliding_window(data, hsize, fsize, foffset, step)
+        _, f = hf_sliding_window(data, hsize, fsize, foffset, hspacing, step)
         return Chronicle(
             f, 
             cols=self._cols, 
@@ -432,9 +435,10 @@ class Sample(FrameBase):
         hsize = self.window_settings.historical.size
         fsize = self.window_settings.future.size
         foffset = self.window_settings.future.offset
+        hspacing = self.window_settings.historical.spacing
         step = self.window_settings.stride
         data = np.array(self).view(np.ndarray)
-        h, _ = hf_sliding_window(data, hsize, fsize, foffset, step)
+        h, _ = hf_sliding_window(data, hsize, fsize, foffset, hspacing, step)
         return Chronicle(
             h, 
             cols=self._cols, 
@@ -457,10 +461,11 @@ class Sample(FrameBase):
         hsize = self.window_settings.historical.size
         fsize = self.window_settings.future.size
         foffset = self.window_settings.future.offset
+        hspacing = self.window_settings.historical.spacing
         step = self.window_settings.stride
         data = np.array(self).view(np.ndarray)
         ht, ft = self._time_to_hf_sliding_window()
-        h, f = hf_sliding_window(data, hsize, fsize, foffset, step)
+        h, f = hf_sliding_window(data, hsize, fsize, foffset, hspacing, step)
         return (
             Chronicle(h, cols=self._cols, is_gen=True, time=ht, scaler=self.scaler, source=self), 
             Chronicle(f, cols=self._cols, is_gen=True, time=ft, scaler=self.scaler, source=self)
@@ -1067,6 +1072,7 @@ class Sample(FrameBase):
         return cls(
             np.stack([f._as_nparray() for f in feature_samples], axis=1), 
             cols=[f.name for f in feature_samples], 
-            time=feature_samples[0]._time
+            time=feature_samples[0]._time,
+            scaler=feature_samples[0].scaler
         )
         

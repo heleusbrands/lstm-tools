@@ -74,6 +74,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `time` property added to the `TimeFrame`, `Sample`, and `Chronicle` classes.
 - Added more robust window settings, with the addition of an `offset` setting for offsetting a future window from the historical.
 - Improved the `hf_sliding_window`method, within the `utils` module, to account for the new `offset` window setting and updated the Sample class.
+- Added `to_numpy()` method to `TimeFrame`, `Sample`, and `Chronicle` classes
+
+### Issues
+- Need to update the documentation to reflect the new changes.
+
+## [0.3.5] - 2025-05
+
+### Changed
+- Fixed error issue with scalers not being passed to a Sample created via `Sample.fromFeatureSamples`
+
+### Added
+- HistoricalWindowSettings and FutureWindowSettings are now two separate classes, to accomodate varying parameters
+- `hf_sliding_window()` method expanded to add an addition `h_spacing` arguement, to allow for spaced element selection
+- Sample class updated to accomodate and integrate the new `spacing` setting of the HistoricalWindowSettings class
 
 ### Issues
 - Need to update the documentation to reflect the new changes.

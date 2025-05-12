@@ -4,7 +4,7 @@ from .exceptions import InvalidWindowSizeError
 import numpy as np
 
 @dataclass
-class WindowSettings:
+class FutureWindowSettings:
     """
     Configuration settings for window operations in time series analysis.
 
@@ -18,6 +18,39 @@ class WindowSettings:
     window_type: WindowType = WindowType.future
     size: int = 10  # Changed from 60 to a more reasonable default
     offset: int = 0
+    
+    def __post_init__(self):
+        self.validate_window_size()
+        
+    def validate_window_size(self):
+        """Validate that window size is positive."""
+        if self.size <= 0:
+            raise InvalidWindowSizeError(f"Window size must be positive, got {self.size}")
+            
+    def __setattr__(self, name, value):
+        """Custom attribute setter with validation."""
+        # Call the default setter
+        object.__setattr__(self, name, value)
+        
+        # Validate window_size when it changes
+        if name == 'window_size':
+            self.validate_window_size()
+
+@dataclass
+class HistoricalWindowSettings:
+    """
+    Configuration settings for window operations in time series analysis.
+
+    Parameters
+    ----------
+    window_type : WindowType
+        Type of the window (future or historical).
+    window_size : int
+        Size of the window in time steps.
+    """
+    window_type: WindowType = WindowType.historical
+    size: int = 10  # Changed from 60 to a more reasonable default
+    spacing: int = 1
     
     def __post_init__(self):
         self.validate_window_size()
@@ -51,8 +84,8 @@ class HFWindowSettings:
     stride : int
         Step size between consecutive windows.
     """
-    historical: WindowSettings = field(default_factory=lambda: WindowSettings(window_type=WindowType.historical))
-    future: WindowSettings = field(default_factory=lambda: WindowSettings(window_type=WindowType.future, size=1))
+    historical: HistoricalWindowSettings = field(default_factory=lambda: HistoricalWindowSettings(window_type=WindowType.historical))
+    future: FutureWindowSettings = field(default_factory=lambda: FutureWindowSettings(window_type=WindowType.future, size=1))
     stride: int = 1
     
     def __post_init__(self):

@@ -191,7 +191,14 @@ def sliding_window(arr, window_size, step_size=1, offset=0):
     # Create the view directly without intermediate copies
     return np.lib.stride_tricks.as_strided(arr, shape=window_shape, strides=new_strides, writeable=False)
 
-def hf_sliding_window(arr, historical_size, future_size, future_offset=0, step_size=1):
+def hf_sliding_window(
+    arr,
+    h_size,
+    f_size,
+    f_offset=0,
+    h_spacing=1,
+    step_size=1
+    ): 
     """
     Create historical and future sliding window views of the input data.
 
@@ -199,54 +206,48 @@ def hf_sliding_window(arr, historical_size, future_size, future_offset=0, step_s
     ----------
     arr : np.ndarray or array-like
         Input array to create windows from. Windowing is performed on the first axis.
-    historical_size : int
-        Size of the historical window (number of elements along the first axis).
-    future_size : int
+    h_size : int
+        The span of the original data from which the historical window's elements are drawn.
+    f_size : int
         Size of the future window (number of elements along the first axis).
-    future_offset : int, optional
+    f_offset : int, optional
         Offset for the start of the future window relative to the end of the
-        historical window. A positive value starts the future window later,
-        a negative value starts it earlier. Default is 0, meaning the future
-        window starts immediately after the historical window.
-        Specifically, the k-th future window will start at an index relative
-        to the start of the k-th historical window by:
-        `start_historical_k + historical_size + future_offset`.
+        historical window. Default is 0.
+    h_spacing : int, optional
+        Step size for picking elements within each historical window.
+        A value of 1 (default) means all elements within the `historical_size` span are taken.
+        A value of k > 1 means every k-th element is taken from the `historical_size` span.
+        For example, if historical_size=100 and h_spacing=3, the window
+        will contain elements from original indices like [0, 3, 6, ..., 99] relative to
+        the start of that window's span.
     step_size : int, optional
-        Step size between consecutive windows (number of elements along the first axis),
-        by default 1.
+        Step size for sliding the entire (historical, future) window pair along `arr`. Default is 1.
 
     Returns
     -------
     Tuple[np.ndarray, np.ndarray]
         Tuple containing (historical_windows, future_windows).
-        The first dimension of each returned array is the number of windows.
-        Subsequent dimensions match the window size and the remaining dimensions
-        of the input array.
 
     Raises
     ------
     ValueError
-        If historical_size, future_size, or step_size are not positive.
-        If `historical_size + future_offset` is negative, meaning the future
-        window would need to start before the beginning of the input array.
+        If various size/step parameters are invalid.
     """
     if not isinstance(arr, np.ndarray):
         arr = np.array(arr)
 
     if arr.ndim == 0:
         raise ValueError("Input array cannot be a scalar.")
-    if historical_size <= 0:
+    if h_size <= 0:
         raise ValueError("historical_size must be positive.")
-    if future_size <= 0:
+    if f_size <= 0:
         raise ValueError("future_size must be positive.")
     if step_size <= 0:
         raise ValueError("step_size must be positive.")
+    if h_spacing <= 0: # Validation for new parameter
+        raise ValueError("historical_segment_step must be positive.")
 
-    # The k-th historical window starts at index `k * step_size`.
-    # The k-th future window is intended to start at index `k * step_size + historical_size + future_offset`.
-    # Thus, the data for the first future window (k=0) starts at original array index `historical_size + future_offset`.
-    # This starting index must be non-negative.
-    future_data_array_start_idx = historical_size + future_offset
+    future_data_array_start_idx = h_size + f_offset
     if future_data_array_start_idx < 0:
         raise ValueError(
             f"The effective start index for future windows in the base array "
@@ -254,16 +255,10 @@ def hf_sliding_window(arr, historical_size, future_size, future_offset=0, step_s
             f"cannot be negative."
         )
 
-    # Determine the maximum extent reached by any single pair of (historical, future) windows
-    # relative to the start of the historical window. This is used to calculate n_windows.
-    # End of historical window (exclusive): historical_size
-    # End of future window (exclusive): historical_size + future_offset + future_size
-    max_reach_from_window_start = max(historical_size, future_data_array_start_idx + future_size)
+    max_reach_from_window_start = max(h_size, future_data_array_start_idx + f_size)
 
-    # Calculate the number of complete (historical, future) window pairs that can be formed.
-    # The available length for sliding is `arr.shape[0] - max_reach_from_window_start`.
     if arr.shape[0] < max_reach_from_window_start:
-        num_possible_steps_for_sliding = -1 # Not enough data for even one full pair
+        num_possible_steps_for_sliding = -1
     else:
         num_possible_steps_for_sliding = arr.shape[0] - max_reach_from_window_start
 
@@ -272,25 +267,36 @@ def hf_sliding_window(arr, historical_size, future_size, future_offset=0, step_s
     else:
         n_windows = (num_possible_steps_for_sliding // step_size) + 1
 
-    # If no windows can be formed, return empty arrays with appropriate shapes.
+    # Calculate the actual number of elements in each (potentially segmented) historical window
+    if h_size == 0 : # Should be caught by historical_size > 0 check
+        num_elements_in_segmented_hist_window = 0
+    else:
+        num_elements_in_segmented_hist_window = (h_size - 1) // h_spacing + 1
+
+
     if n_windows <= 0:
-        # Shape: (0, window_size_dim0, ...other_dims...)
-        empty_hist_shape = (0, historical_size) + arr.shape[1:]
-        empty_fut_shape = (0, future_size) + arr.shape[1:]
+        # For empty hist_shape, use the new segmented size
+        empty_hist_shape = (0, num_elements_in_segmented_hist_window) + arr.shape[1:]
+        empty_fut_shape = (0, f_size) + arr.shape[1:]
         return np.empty(empty_hist_shape, dtype=arr.dtype), np.empty(empty_fut_shape, dtype=arr.dtype)
 
     # Define the shape of the resulting window arrays
-    hist_shape = (n_windows, historical_size) + arr.shape[1:]
-    fut_shape = (n_windows, future_size) + arr.shape[1:]
+    # Historical window shape changes based on segmentation
+    hist_shape = (n_windows, num_elements_in_segmented_hist_window) + arr.shape[1:]
+    fut_shape = (n_windows, f_size) + arr.shape[1:] # Future window shape is unchanged
 
     # Define the strides for the window arrays
-    # Strides: (bytes_to_next_window_start, bytes_to_next_element_in_window_dim0, ...strides_for_other_dims...)
     base_element_strides = arr.strides
-    # Stride for the first dimension (stepping between windows)
-    window_step_stride_bytes = base_element_strides[0] * step_size
+    window_step_stride_bytes = base_element_strides[0] * step_size # Stride for the 'n_windows' dimension
 
-    hist_strides = (window_step_stride_bytes,) + base_element_strides
-    # Future windows step through the array in the same way, so strides structure is similar
+    # Strides for dimensions *within* each historical window
+    # The first of these (arr.strides[0]) needs to be scaled by historical_segment_step
+    strides_within_hist_window_list = list(base_element_strides)
+    strides_within_hist_window_list[0] *= h_spacing
+    
+    hist_strides = (window_step_stride_bytes,) + tuple(strides_within_hist_window_list)
+
+    # Strides for future windows remain as before (no internal segmentation for future windows)
     fut_strides = (window_step_stride_bytes,) + base_element_strides
 
     historical_windows = np.lib.stride_tricks.as_strided(
@@ -300,14 +306,12 @@ def hf_sliding_window(arr, historical_size, future_size, future_offset=0, step_s
         writeable=False
     )
 
-    # The future windows are formed from a view of the original array that starts
-    # at `future_data_array_start_idx`.
     future_array_base_view = arr[future_data_array_start_idx:]
 
     future_windows = np.lib.stride_tricks.as_strided(
         future_array_base_view,
         shape=fut_shape,
-        strides=fut_strides, # Strides are relative to the memory layout of `arr` (and `future_array_base_view` shares it)
+        strides=fut_strides,
         writeable=False
     )
 

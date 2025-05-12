@@ -23,7 +23,7 @@ from .feature import Feature, FeatureSample
 from .chronicle import Chronicle
 
 # Settings and configuration
-from .settings import HFWindowSettings, WindowSettings, WindowType
+from .settings import HFWindowSettings, HistoricalWindowSettings, FutureWindowSettings, WindowType
 from .logger import configure_logging, logger, debug, info, warning, error, critical
 
 # Exception classes

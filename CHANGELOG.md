@@ -91,3 +91,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Issues
 - Need to update the documentation to reflect the new changes.
+
+## [0.3.6] - 2025-05
+
+### Changed
+- Fixed import error, due to previous changes not being correctly updated in the `__init__`
+
+### Issues
+- Need to update the documentation to reflect the new changes.

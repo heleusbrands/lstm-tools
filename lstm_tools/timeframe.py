@@ -70,12 +70,15 @@ class TimeFrame(FrameBase):
         if isinstance(input_data[0], cls.subtype):
             # Extract _base from each Feature
             base_data = np.array([f._base for f in input_data], dtype=cls.nptype)
+        elif isinstance(input_data, np.ndarray):
+            base_data = input_data
+            cls.nptype = base_data.dtype
         else:
             # Just use the input data directly
             base_data = np.array(input_data, dtype=cls.nptype)
 
         # Create a view of the base data and store the data directly in the view
-        obj = np.array(base_data, dtype=dtype).view(cls)
+        obj = base_data.view(cls)
         obj._time = time_handler(time)
         obj._shape = base_data.shape
         obj._cols = cols
@@ -142,7 +145,7 @@ class TimeFrame(FrameBase):
 
     def __array__(self):
         """Return the underlying array data."""
-        return np.array(self).view(np.ndarray)
+        return self.view(np.ndarray)
 
     @profile
     def __array_finalize__(self, obj):

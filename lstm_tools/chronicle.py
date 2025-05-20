@@ -1,7 +1,9 @@
 from __future__ import annotations
+
+from lstm_tools.settings import SubWindowsSettings
 from .base import FrameBase
 from .sample import Sample
-from .feature import FeatureChronicle
+from .feature import FeatureChronicle, FeatureSample
 from .utils import *
 from line_profiler import profile
 from typing import TYPE_CHECKING, List, Union
@@ -101,12 +103,16 @@ class Chronicle(FrameBase):
                     # Convert time to 2D if it's not already
                     if time is not None:
                         time = np.array([time[i] if i < len(time) else None for i in range(len(input_data))])
+        elif isinstance(input_data, np.ndarray):
+            base_data = input_data
+            cls.nptype = base_data.dtype
         else:
             # Use raw data directly
             base_data = np.array(input_data, dtype=cls.nptype)
         
         # Create a view of the base data and store the data directly in the view
-        obj = np.array(base_data, dtype=dtype).view(cls)
+        # obj = np.array(base_data, dtype=dtype).view(cls)
+        obj = base_data.view(cls)
         
         
         # Infer shape from the data
@@ -117,10 +123,11 @@ class Chronicle(FrameBase):
         obj._level = 0
         obj.scaler = scaler
         obj.name = name
-        obj.compressors = Storage(**{col: [] for col in cols})
         obj.is_gen = is_gen
 
-        if np.any(source): cls.__load_metadata__(source, obj)
+        if np.any(source): obj = cls.__load_metadata__(source, obj)
+        if not getattr(obj, 'sub_window_settings', None): obj.sub_window_settings = SubWindowsSettings(window_sizes=[], alignment="right", axis=1)
+        if not getattr(obj, 'compressors', None): obj.compressors = Storage(**{col: [] for col in cols})
         return obj
     
     @profile
@@ -147,7 +154,7 @@ class Chronicle(FrameBase):
         if isinstance(item, str):
             # Get by column name
             idx = self._cols.index(item)
-            return FeatureChronicle(np.array(self).view(np.ndarray)[:, :, idx], name=item, time=self._time, compressors = self.compressors[item]) if len(self._shape) == 3 else FeatureSample(np.array(self).view(np.ndarray)[:, idx], name=item, time=self._time)
+            return FeatureChronicle(self.view(np.ndarray)[:, :, idx], name=item, time=self._time, compressors = self.compressors[item], source=self) if len(self._shape) == 3 else FeatureSample(self.view(np.ndarray)[:, idx], name=item, time=self._time)
         elif isinstance(item, int):
             # Get by numeric index - return a Sample
             if not (0 <= item < len(self)):
@@ -155,19 +162,19 @@ class Chronicle(FrameBase):
             
             # Create a Sample only when explicitly requested by index
             if len(self._shape) == 3:
-                sample_data = np.array(self).view(np.ndarray)[item]
+                sample_data = self.view(np.ndarray)[item]
             else:
                 # Handle special case for non-3D data
-                sample_data = np.array(self).view(np.ndarray)[item:item+1]
+                sample_data = self.view(np.ndarray)[item:item+1]
                 
             time_value = self._time[item] if self._time is not None and hasattr(self._time, '__getitem__') else None
             return self.subtype(sample_data, self._cols, idx=item, time=time_value, scaler=self.scaler)
         elif isinstance(item, tuple):
             # Handle multi-dimensional indexing
-            return np.array(self).view(np.ndarray)[item]
+            return self.view(np.ndarray)[item]
         else:
             # Slice handling
-            raw_slice = np.array(self).view(np.ndarray)[item]
+            raw_slice = self.view(np.ndarray)[item]
             if self._time is not None and hasattr(self._time, '__getitem__'):
                 if isinstance(item, slice):
                     start = item.start or 0
@@ -194,14 +201,14 @@ class Chronicle(FrameBase):
                 # Get the index using the super implementation to avoid recursion
                 arr = super().__getattribute__('__array__')()
                 idx = cols.index(name)
-                return FeatureChronicle(arr[:,:, idx], name=name, time=self._time, compressors = self.compressors[name])
+                return FeatureChronicle(arr[:,:, idx], name=name, time=self._time, compressors = self.compressors[name], source=self)
         except (AttributeError, ValueError):
             pass
         return super().__getattribute__(name)
 
     def __array__(self):
         """Return the underlying array data."""
-        return np.array(self).view(np.ndarray)
+        return self.view(np.ndarray)
         
     @profile
     def __array_finalize__(self, obj):
@@ -268,18 +275,30 @@ class Chronicle(FrameBase):
                 raise ValueError("All samples must have same time values")
                 
         # Stack the base arrays to create Chronicle's base data
-        base_data = np.stack([np.array(sample).view(np.ndarray) for sample in samples])
+        base_data = np.stack([sample.view(np.ndarray) for sample in samples], axis=1)
         
         # Use time from first sample since they're all the same
         time = samples[0]._time
         
-        # Use cols from first sample
-        cols = ['_'.join(c.split('_')) for c in samples[0]._cols] if '_' in samples[0]._cols[0] else samples[0]._cols
+        # Ensure all _cols are the same
+        ref_col = samples[0]._cols
+        other_cols = [s._cols for s in samples[1:]]
+        if not all(ref_col == c for c in other_cols):
+            raise ValueError("All samples must have same columns")
         
         # Use scaler from first sample if it exists
         scaler = getattr(samples[0], 'scaler', None)
         
-        return cls(base_data, cols=cols, time=time, scaler=scaler)
+        return cls(base_data, cols=ref_col, time=time, scaler=scaler)
+
+    def remove_feature(self, feature: str):
+        """
+        Remove a feature from the Chronicle.
+        """
+        index = self._cols.index(feature)
+        data = np.delete(self.to_numpy(), index, axis=2)
+        cols = [c for c in self._cols if c != feature]
+        return Chronicle(data, cols=cols, time=self._time, scaler=self.scaler, source=self)
 
     def to_numpy(self):
         return self.__array__()
@@ -407,6 +426,24 @@ class Chronicle(FrameBase):
         time = self._time[0:window_size] if direction == 'forward' else self._time[-window_size:]
         return Chronicle(subwin, cols=self._cols, is_gen=False, time=time, scaler=self.scaler)
     
+    def sub_window_over_axis(self):
+        sub_windows = sub_window_over_dimension(self.to_numpy(), self.sub_window_settings.window_sizes, self.sub_window_settings.alignment, self.sub_window_settings.axis)
+        sub_windows_time = sub_window_over_dimension(self._time, self.sub_window_settings.window_sizes, self.sub_window_settings.alignment, self.sub_window_settings.axis)
+        windows = [Chronicle(subwin, cols=self._cols, is_gen=False, time=time, scaler=self.scaler, source=self) for subwin, time in zip(sub_windows, sub_windows_time)]
+        if self.sub_window_settings.return_origin: 
+            midx = self.sub_window_settings.window_sizes.index(max(self.sub_window_settings.window_sizes)) # Determine the location of the largest window
+            idx = midx if midx == 0 else midx + 1
+            windows.insert(idx, self)
+        return windows
+    
+    def _get_compression_cols(self):
+        original_cols = self.compressors.keys()
+        compression_cols = []
+        for col in original_cols:
+            for method in self.compressors[col]:
+                compression_cols.append(f"{col}_{method}")
+        return compression_cols
+
     @profile
     def compress(self, feature: str, method: callable):
         """
@@ -427,24 +464,29 @@ class Chronicle(FrameBase):
             Compressed feature data.
         """
         # Create a list to hold the results
-        results = []
-        data = np.array(self).view(np.ndarray)
-        
-        # Process each sample without eagerly creating Sample objects
-        for i in range(len(data)):
-            # Get the data for the feature
-            if len(data.shape) == 3:
-                feature_idx = self._cols.index(feature) if isinstance(feature, str) else feature
-                feature_data = data[i, :, feature_idx]
+        has_axis = has_axis_argument(method) # Determine if vectorization is possible
+        axis = 1 if has_axis else None
+        if hasattr(self[feature], 'to_numpy'):
+            data = self[feature].to_numpy()
+        else:
+            data = self[feature].view(np.ndarray)
+        name = f"{feature}_{method.__name__}"
+
+        if np.any(self._time):
+            if self.sub_window_settings.alignment == 'right':
+                time = self._time[:, -1] if len(self._time.shape) == 2 else self._time[-1]
             else:
-                feature_idx = self._cols.index(feature) if isinstance(feature, str) else feature
-                feature_data = data[i, feature_idx]
-            
-            # Apply the method directly to the feature data
-            results.append(method(feature_data))
+                time = self._time[:, 0] if len(self._time.shape) == 2 else self._time[0]
+        else:
+            time = None
+
+        if has_axis:
+            results = method(data, axis=axis)
+            return FeatureSample(results, name=name, time=time)
         
-        return np.array(results)
-    
+        results = [method(d) for d in data]
+        
+        return FeatureSample(np.array(results), name=name, time=time)
     
     def squeeze(self):
         """
@@ -456,8 +498,13 @@ class Chronicle(FrameBase):
             return self
 
     def compress_all_features(self):
-        compressed_features = [f.compress() for f in self.features]
+        compressed_features = []
+        for feature, compressors in self.compressors.items():
+            compressed_features.extend([self.compress(feature, method) for method in compressors])
         return compressed_features
+    
+    def compress_features_to_sample(self):
+        return Sample.from_FeatureSamples(self.compress_all_features(), scaler=self.scaler)
 
     @profile
     def batch_compress(self, features=None, methods=None):

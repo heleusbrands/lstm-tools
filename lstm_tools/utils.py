@@ -6,6 +6,11 @@ import datetime
 import statistics as st
 from collections import UserDict
 from typing import Any
+from inspect import signature
+
+_DEFAULT_TARGET_CHUNK_PROCESSING_MEMORY_MB = 256
+_DEFAULT_K_MEMORY_MULTIPLIER = 4
+_MIN_ARRAY_SIZE_FOR_AUTOCHUNK_MB = 512
 
 def verify_dataset(dataset, samples, sequence_length):
     """
@@ -71,6 +76,9 @@ def merge_csv(names: List[str], files: List[str], output_path: str=None, append:
             os.remove(os.path.join(output_path, f"{file_name}.csv"))
         con_data.to_csv(os.path.join(output_path, f"{file_name}.csv"), index=False)
     return con_data
+
+def has_axis_argument(func):
+    return 'axis' in signature(func).parameters
 
 def date_converter(date: str, format: str = "%m-%d-%y-%H-%M"):
     datetime_object = datetime.datetime.strptime(date, format)
@@ -317,6 +325,121 @@ def hf_sliding_window(
 
     return historical_windows, future_windows
 
+def sub_window_over_dimension(
+    arr: np.ndarray,
+    window_sizes: list[int], # Use list[int] for Python 3.9+
+    alignment: str,
+    axis_to_window: int = 1) -> list[np.ndarray]: # Use list[np.ndarray]
+    """
+    Creates sub-window selections (views) over a specified dimension of an input array.
+
+    For each size in window_sizes, a sub-window view is created from the input array.
+    This function does not create sliding windows that increase the number of items;
+    instead, it extracts a fixed-size segment from the specified axis for each
+    existing item along other axes. The created windows will overlap if their
+    source regions in the original array overlap (e.g., asking for left-aligned
+    windows of size 2 and 5 will result in the size 2 window being a sub-region
+    of the size 5 window).
+
+    Parameters
+    ----------
+    arr : np.ndarray
+        Input array. For optimal performance, this should already be a NumPy array.
+    window_sizes : list[int]
+        A list of integers, where each integer specifies the size of a
+        sub-window to be created along the `axis_to_window`.
+    alignment : str
+        Determines the alignment of the sub-windows:
+        - "right": Right-aligned ("historical"). Windows are taken from the end
+                  (most recent part) of the `axis_to_window`.
+                  E.g., for size `k`, the slice is `arr[..., -k:, ...]`.
+        - "left": Left-aligned ("future" or "forward-looking"). Windows are taken
+                   from the beginning of the `axis_to_window`.
+                   E.g., for size `k`, the slice is `arr[..., :k, ...]`.
+    axis_to_window : int, optional
+        The dimension (axis) of `arr` from which sub-windows will be extracted.
+        Defaults to 1 (the second dimension, as per the example context).
+
+    Returns
+    -------
+    list[np.ndarray]
+        A list of NumPy arrays, where each array is a view into the original `arr`
+        and corresponds to a size specified in `window_sizes`. The shapes of these
+        views will be the same as `arr` except along `axis_to_window`, where the
+        dimension size will be the respective window size.
+
+    Raises
+    ------
+    TypeError
+        If `arr` is not a NumPy array and cannot be converted by `np.array()`.
+    ValueError
+        If `arr` is 0-dimensional (scalar).
+        If `axis_to_window` is out of bounds for `arr.ndim`.
+        If any `window_size` in `window_sizes` is not a positive integer.
+        If any `window_size` is larger than the dimension size of `arr`
+        at `axis_to_window`.
+    """
+    if not isinstance(arr, np.ndarray):
+        # Attempt to convert to NumPy array if it's not.
+        # For performance-critical applications, passing an ndarray directly is preferred.
+        try:
+            arr_np = np.array(arr)
+        except Exception as e:
+            raise TypeError(
+                f"Input 'arr' must be a NumPy array or convertible to one. "
+                f"Conversion failed: {e}"
+            )
+    else:
+        arr_np = arr
+
+    if arr_np.ndim == 0:
+        raise ValueError("Input array 'arr' cannot be a 0-dimensional scalar.")
+
+    if not (0 <= axis_to_window < arr_np.ndim):
+        raise ValueError(
+            f"axis_to_window ({axis_to_window}) is out of bounds "
+            f"for input array with {arr_np.ndim} dimensions."
+        )
+
+    dim_size_to_window_on = arr_np.shape[axis_to_window]
+    output_views = []
+
+    if not window_sizes: # Handle empty window_sizes list
+        return output_views
+
+    for k_size in window_sizes:
+        if not isinstance(k_size, int) or k_size <= 0:
+            raise ValueError(
+                f"All window sizes must be positive integers, got {k_size}."
+            )
+        if k_size > dim_size_to_window_on:
+            raise ValueError(
+                f"Window size {k_size} is larger than the dimension size "
+                f"{dim_size_to_window_on} at axis {axis_to_window}."
+            )
+
+        # Construct the slice tuple for all dimensions.
+        # Start with slice(None) for all dimensions, which means selecting all elements
+        # along those axes (equivalent to ':'). Then, overwrite the slice for the target axis.
+        slice_obj_list = [slice(None)] * arr_np.ndim
+
+        if alignment == "right":  # Right-aligned (from the end)
+            # Slice for the target dimension: from -k_size up to the end.
+            # e.g., if k_size=5, indices are -5, -4, -3, -2, -1 relative to end.
+            target_dim_slice = slice(-k_size, None)
+        elif alignment == "left":  # Left-aligned (from the beginning)
+            # Slice for the target dimension: from 0 up to (but not including) k_size.
+            # e.g., if k_size=5, indices are 0, 1, 2, 3, 4.
+            target_dim_slice = slice(0, k_size)
+
+        slice_obj_list[axis_to_window] = target_dim_slice
+        
+        # NumPy indexing requires a tuple of slice objects or indices
+        sub_window_view = arr_np[tuple(slice_obj_list)]
+        output_views.append(sub_window_view)
+
+    return output_views
+
 def subwindow(arr, subwindow_size, direction="backward"):
     """
     Create a subwindow view from a sliding window.
@@ -353,7 +476,116 @@ def calculate_weighted_mean(data):
     weights = weights / weights.sum()  # normalize weights to sum to 1
     return np.average(data, weights=weights)
 
-def kurtosis(arr, axis=0):
+def first(arr: np.ndarray, axis: int) -> np.ndarray:
+    """
+    Returns the first element (slice) along the specified axis.
+
+    This is functionally equivalent to `arr[..., 0, ...]`, where the `0`
+    is at the position specified by `axis`.
+
+    Parameters
+    ----------
+    arr : array_like
+        Input array or object that can be converted to an array.
+    axis : int
+        The axis along which to select the first element.
+        Negative axis values are supported (e.g., -1 for the last axis).
+
+    Returns
+    -------
+    np.ndarray
+        An array containing the first element of each slice along the specified axis.
+        The returned array will have one less dimension than the input array.
+
+    Raises
+    ------
+    np.AxisError
+        If the specified axis is out of bounds for the input array's dimensions.
+    IndexError
+        If the specified axis has a size of 0 (i.e., it's an empty dimension).
+    TypeError
+        If `arr` cannot be converted to a NumPy array.
+    """
+    # np.take handles array conversion, axis normalization, and bounds checking.
+    try:
+        return np.take(arr, indices=0, axis=axis)
+    except IndexError as e:
+        # Provide a slightly more specific message if the axis exists but is empty
+        # First, ensure 'arr' is an ndarray to check its properties
+        if not isinstance(arr, np.ndarray):
+            try:
+                # Attempt conversion once to check properties; np.take will do its own.
+                # This is just for a more specific error message.
+                temp_arr = np.asarray(arr)
+            except TypeError:
+                raise e # Let original TypeError from np.take propagate if initial conversion fails
+        else:
+            temp_arr = arr
+        
+        # Normalize axis to check shape (np.take would have already raised AxisError if axis is invalid)
+        ndim = temp_arr.ndim
+        current_axis_normalized = axis
+        if axis < 0:
+            current_axis_normalized += ndim
+        
+        if 0 <= current_axis_normalized < ndim and temp_arr.shape[current_axis_normalized] == 0:
+            raise IndexError(f"Cannot select the first element along axis {axis} because this axis has size 0.") from e
+        raise # Re-raise original IndexError if it's for a different reason or AxisError from np.take
+    # np.AxisError and other errors from np.take will propagate naturally.
+
+
+def last(arr: np.ndarray, axis: int) -> np.ndarray:
+    """
+    Returns the last element (slice) along the specified axis.
+
+    This is functionally equivalent to `arr[..., -1, ...]`, where the `-1`
+    is at the position specified by `axis`.
+
+    Parameters
+    ----------
+    arr : array_like
+        Input array or object that can be converted to an array.
+    axis : int
+        The axis along which to select the last element.
+        Negative axis values are supported.
+
+    Returns
+    -------
+    np.ndarray
+        An array containing the last element of each slice along the specified axis.
+        The returned array will have one less dimension than the input array.
+
+    Raises
+    ------
+    np.AxisError
+        If the specified axis is out of bounds for the input array's dimensions.
+    IndexError
+        If the specified axis has a size of 0 (i.e., it's an empty dimension).
+    TypeError
+        If `arr` cannot be converted to a NumPy array.
+    """
+    try:
+        return np.take(arr, indices=-1, axis=axis)
+    except IndexError as e:
+        # Provide a slightly more specific message if the axis exists but is empty
+        if not isinstance(arr, np.ndarray):
+            try:
+                temp_arr = np.asarray(arr)
+            except TypeError:
+                raise e
+        else:
+            temp_arr = arr
+            
+        ndim = temp_arr.ndim
+        current_axis_normalized = axis
+        if axis < 0:
+            current_axis_normalized += ndim
+            
+        if 0 <= current_axis_normalized < ndim and temp_arr.shape[current_axis_normalized] == 0:
+            raise IndexError(f"Cannot select the last element along axis {axis} because this axis has size 0.") from e
+        raise
+
+def kurtosis_old(arr, axis=0):
     """Calculates kurtosis along the specified axis.
 
   Args:
@@ -375,6 +607,245 @@ def kurtosis(arr, axis=0):
     std = np.sqrt(var)
     central_moments = np.mean((arr - mean)**4, axis=axis)
     return (n * central_moments) / (var**2) - 3 * (n - 1) / (n - 2)
+
+def _calculate_kurtosis_on_chunk(chunk_data: np.ndarray,
+                                 axis: int | None,
+                                 fisher: bool,
+                                 bias: bool,
+                                 n_for_bias_correction: float) -> np.ndarray | float:
+    """
+    Core logic to calculate kurtosis on a given data chunk.
+    n_for_bias_correction is the N from the original slice for unbiased correction factors.
+    """
+    # N for current chunk's calculations (should be same as n_for_bias_correction
+    # if chunking is not done along the reduction axis itself)
+    n_in_chunk_reduction_axis = chunk_data.shape[axis] if axis is not None else chunk_data.size
+
+    if n_in_chunk_reduction_axis == 0:
+        if axis is None: return np.nan
+        out_shape_list = list(chunk_data.shape)
+        current_axis_norm_chunk = axis if axis >= 0 else axis + chunk_data.ndim
+        # Ensure axis index is valid before attempting to delete
+        if 0 <= current_axis_norm_chunk < len(out_shape_list):
+            del out_shape_list[current_axis_norm_chunk]
+        elif len(out_shape_list) == 0 and chunk_data.ndim > 0 : # e.g. input (0,), axis=0
+             return np.nan # scalar NaN
+        else: # Should be caught by wrapper if axis is globally invalid or array.size is 0
+            # This case might occur if chunk_data itself has a 0-dim axis, e.g. (X, 0, Y)
+            # and this function is called. The out_shape_list logic should handle it.
+            pass
+        if not out_shape_list and chunk_data.ndim == 1: return np.nan # scalar output
+        return np.full(tuple(out_shape_list) if out_shape_list else (), np.nan)
+
+    with np.errstate(divide='ignore', invalid='ignore'): # Handle 0/0 or x/0
+        mean_val = np.mean(chunk_data, axis=axis, keepdims=True)
+        deviations = chunk_data - mean_val
+        dev_sq = deviations**2
+        
+        # Biased moments (denominator: n_in_chunk)
+        m2_biased = np.mean(dev_sq, axis=axis, keepdims=True)
+        m4_biased = np.mean(dev_sq**2, axis=axis, keepdims=True) # m4 = E[(X-mu)^4]
+
+        is_m2_zero_mask = np.isclose(m2_biased, 0.0) # True where variance is zero
+
+        if bias:
+            # For constant data (m2_biased=0), m4_biased=0. Pearson kurtosis = 0. Excess = -3.
+            # This matches SciPy for bias=True.
+            pearson_kurtosis_val = np.where(is_m2_zero_mask, 0.0, m4_biased / (m2_biased**2))
+            
+            if fisher:
+                kurtosis_result = pearson_kurtosis_val - 3.0
+            else:
+                kurtosis_result = pearson_kurtosis_val
+        else: # Unbiased calculation (aiming for SciPy bias=False behavior)
+            N = n_for_bias_correction # N of the original slice/array
+            if N < 4: # Unbiased kurtosis undefined for N < 4
+                out_shape_list = list(m4_biased.shape) # Use shape before reduction
+                current_axis_norm_chunk = axis if axis is None or axis >=0 else axis + chunk_data.ndim
+                if axis is not None: del out_shape_list[current_axis_norm_chunk]
+                return np.full(tuple(out_shape_list) if out_shape_list else (), np.nan)
+
+            # For constant data (m2_biased is zero) and N >= 4:
+            # SciPy returns -3.0 for Fisher (excess) and 0.0 for Pearson.
+            # This specific handling for constant data in unbiased mode is crucial.
+            
+            # General formula for non-constant data (SciPy's _skewtest_finish for kurtosis)
+            # G2_excess = ( (N-1) / ((N-2)*(N-3)) ) * ( (N+1) * (m4/m2^2)_biased_moments - 3*(N-1) )
+            # Here, m4 and m2 are the biased moments from the sample.
+            g2_term_from_biased_moments = m4_biased / (m2_biased**2) # This will be NaN if m2_biased is 0
+
+            num = (N - 1.0) * ((N + 1.0) * g2_term_from_biased_moments - 3.0 * (N - 1.0))
+            den = (N - 2.0) * (N - 3.0)
+            
+            unbiased_excess_kurtosis = num / den # Will be NaN if g2_term was NaN or den=0 (N<4 handles den=0)
+
+            # Now, apply the special handling for constant data (m2_biased == 0)
+            # Squeeze mask if needed. The result of np.where should match the non-constant calculation shape.
+            squeezed_m2_zero_mask = is_m2_zero_mask
+            # kurtosis_result will be shaped like the output of np.mean(..., axis=axis)
+            # mean_val was (..., 1, ...), m2_biased was (..., 1, ...), result is (..., ...)
+            if axis is not None and m2_biased.ndim > unbiased_excess_kurtosis.ndim :
+                 squeezed_m2_zero_mask = is_m2_zero_mask.squeeze(axis=axis)
+            
+            if fisher:
+                kurtosis_result = np.where(squeezed_m2_zero_mask, -3.0, unbiased_excess_kurtosis)
+            else: # Pearson kurtosis
+                kurtosis_result = np.where(squeezed_m2_zero_mask, 0.0, unbiased_excess_kurtosis + 3.0)
+    
+    return kurtosis_result
+
+
+def kurtosis(arr: np.ndarray,
+             axis: int | None = None,
+             fisher: bool = True,
+             bias: bool = True,
+             chunk_size: int | None = None) -> np.ndarray | float:
+    """
+    Calculates kurtosis (Fisher's or Pearson's) of data in an array
+    along a specified axis, with optional and automatic chunking for memory efficiency.
+
+    Parameters
+    ----------
+    arr : np.ndarray
+        Input array containing numbers. Must be a NumPy array or convertible.
+    axis : int or None, optional
+        Axis along which the kurtosis is computed.
+        If None (default), the kurtosis is computed over the entire flattened array.
+    fisher : bool, optional
+        If True (default), Fisher's definition of kurtosis is used (normal ==> 0.0).
+        If False, Pearson's definition is used (normal ==> 3.0).
+    bias : bool, optional
+        If True (default), the biased kurtosis (based on N-denominator moments)
+        is calculated.
+        If False, an attempt is made to compute sample kurtosis adjusted for bias,
+        similar to `scipy.stats.kurtosis(bias=False)`. Returns NaN for N < 4.
+        For constant data (variance=0) and N>=4, returns -3.0 (Fisher) or 0.0 (Pearson).
+    chunk_size : int or None, optional
+        Number of slices to process at a time along the primary non-reduction axis.
+        If None, attempts to auto-calculate a chunk size for large arrays.
+        Set to a value (e.g., 1000) to manually control memory usage.
+
+    Returns
+    -------
+    np.ndarray or float
+        The kurtosis values. If `axis` is None, a float is returned.
+        Returns 0.0 (Pearson) or -3.0 (Fisher) for slices with zero standard
+        deviation when `bias=True`.
+        For `bias=False` and zero standard deviation (N>=4), returns 0.0 (Pearson)
+        or -3.0 (Fisher).
+        Returns np.nan for slices where kurtosis is undefined (e.g., N<4 for
+        unbiased, or empty input).
+    """
+    if not isinstance(arr, np.ndarray):
+        try: arr_internal = np.array(arr, dtype=float)
+        except Exception as e: raise TypeError(f"Input 'arr' must be NumPy array or convertible. Error: {e}")
+    elif np.issubdtype(arr.dtype, np.integer) or np.issubdtype(arr.dtype, np.bool_):
+        arr_internal = arr.astype(float)
+    else: arr_internal = arr
+
+    if arr_internal.ndim == 0: # Scalar input
+        if bias:
+            return -3.0 if fisher else 0.0 # Kurtosis of a single point (N=1, m2=0)
+        else: # bias=False, N=1 < 4
+            return np.nan
+
+    # Normalize axis and get N for global checks
+    current_axis_normalized: int
+    n_global_reduction_axis: int
+    if axis is None:
+        current_axis_normalized = -1 # Indicates no specific axis for shape manipulation later
+        n_global_reduction_axis = arr_internal.size
+    else:
+        if not (-arr_internal.ndim <= axis < arr_internal.ndim):
+            raise np.AxisError(f"Axis {axis} is out of bounds for array of dimension {arr_internal.ndim}")
+        current_axis_normalized = axis if axis >= 0 else axis + arr_internal.ndim
+        n_global_reduction_axis = arr_internal.shape[current_axis_normalized]
+
+    # Handle empty array or zero-length reduction axis globally
+    if arr_internal.size == 0 or n_global_reduction_axis == 0:
+        if axis is None: return np.nan
+        out_shape_list = list(arr_internal.shape)
+        # Ensure current_axis_normalized is valid before del
+        if 0 <= current_axis_normalized < len(out_shape_list):
+            del out_shape_list[current_axis_normalized]
+        elif len(out_shape_list)==0 and arr_internal.ndim > 0: # e.g. input (0,), axis=0, result is scalar
+            return np.nan
+        if not out_shape_list and arr_internal.ndim == 1 : return np.nan
+        return np.full(tuple(out_shape_list) if out_shape_list else (), np.nan)
+
+    # Global check for unbiased kurtosis with N < 4
+    if not bias and n_global_reduction_axis < 4:
+        if axis is None: return np.nan
+        out_shape_list = list(arr_internal.shape)
+        del out_shape_list[current_axis_normalized]
+        if not out_shape_list and arr_internal.ndim == 1: return np.nan
+        return np.full(tuple(out_shape_list) if out_shape_list else (), np.nan)
+
+    # --- Chunking Logic ---
+    apply_chunking = False
+    effective_chunk_size = 0
+    iteration_axis = -1
+
+    if axis is None or arr_internal.ndim <= 1: # No chunking for flat or 1D arrays in this scheme
+        pass
+    else: # ndim > 1 and axis is not None (so current_axis_normalized is set)
+        iteration_axis = 0 if current_axis_normalized != 0 else 1
+        if iteration_axis >= arr_internal.ndim: # e.g. 2D array, axis=0, iteration_axis=1 (valid)
+                                                # e.g. 2D array, axis=1, iteration_axis=0 (valid)
+                                                # This check is more for safety if ndim became <2 unexpectedly
+            iteration_axis = -1
+
+    if chunk_size is not None: # User specified a chunk size
+        if not isinstance(chunk_size, int) or chunk_size <= 0:
+            raise ValueError("User-specified chunk_size must be a positive integer.")
+        if iteration_axis != -1 and arr_internal.shape[iteration_axis] > chunk_size:
+            apply_chunking = True
+            effective_chunk_size = chunk_size
+    elif iteration_axis != -1: # Auto-chunking mode, and a valid iteration_axis exists
+        if arr_internal.nbytes > _MIN_ARRAY_SIZE_FOR_AUTOCHUNK_MB * 1024 * 1024:
+            bytes_per_slice_along_iteration_axis = arr_internal.nbytes / arr_internal.shape[iteration_axis]
+            if bytes_per_slice_along_iteration_axis > 0:
+                target_data_chunk_bytes = (_DEFAULT_TARGET_CHUNK_PROCESSING_MEMORY_MB * 1024 * 1024) / _DEFAULT_K_MEMORY_MULTIPLIER
+                desired_chunk_len = max(1, int(np.floor(target_data_chunk_bytes / bytes_per_slice_along_iteration_axis)))
+                if arr_internal.shape[iteration_axis] > desired_chunk_len:
+                    apply_chunking = True
+                    effective_chunk_size = desired_chunk_len
+                    print(f"Large Array Detect: Auto-Chunking at Chunk Size: {effective_chunk_size}")
+            # else: bytes_per_slice is 0 (e.g. shape=(100,0,10)), no meaningful chunking on this axis.
+    
+    # --- Actual processing ---
+    if not apply_chunking or iteration_axis == -1 : # Added iteration_axis == -1 check
+        return _calculate_kurtosis_on_chunk(arr_internal, axis, fisher, bias, float(n_global_reduction_axis))
+    else:
+        num_total_slices = arr_internal.shape[iteration_axis]
+        if effective_chunk_size <= 0 : effective_chunk_size = 1 # Should be caught if user set it. Default for auto.
+
+        num_chunks = int(np.ceil(num_total_slices / effective_chunk_size))
+        results_list = []
+        slicer = [slice(None)] * arr_internal.ndim
+
+        for i in range(num_chunks):
+            start_idx = i * effective_chunk_size
+            end_idx = min(start_idx + effective_chunk_size, num_total_slices)
+            slicer[iteration_axis] = slice(start_idx, end_idx)
+            current_data_chunk = arr_internal[tuple(slicer)]
+            
+            kurt_for_chunk = _calculate_kurtosis_on_chunk(current_data_chunk,
+                                                          axis, fisher, bias,
+                                                          float(n_global_reduction_axis))
+            results_list.append(kurt_for_chunk)
+        
+        concat_axis = iteration_axis
+        if axis is not None and iteration_axis > current_axis_normalized:
+            concat_axis -= 1
+        
+        # Handle case where results_list might be empty if num_chunks was 0 (e.g. iteration_axis had size 0)
+        if not results_list: # Should be caught by earlier n_global_reduction_axis==0 or arr_internal.size==0
+            if axis is None: return np.nan
+            out_shape_list = list(arr_internal.shape); del out_shape_list[current_axis_normalized]
+            return np.full(tuple(out_shape_list) if out_shape_list else (), np.nan)
+
+        return np.concatenate(results_list, axis=concat_axis)
 
 def skew_with_bias(arr, axis=0, bias=True):
   """
@@ -405,7 +876,7 @@ def skew_with_bias(arr, axis=0, bias=True):
   else:
     return np.sqrt(n * (n - 1)) * central_moments / ((n - 2) * std**3)
 
-def skew(arr):
+def skew_old(arr):
     """
     Calculate the skew of a NumPy array efficiently.
 
@@ -431,6 +902,189 @@ def skew(arr):
     # Calculate the skew using vectorized operations
     n = len(arr)
     return np.sum(standardized_arr**3) / n
+
+def _calculate_skew_on_chunk(chunk_data: np.ndarray,
+                              axis: int | None,
+                              bias: bool,
+                              n_for_unbiased_calc: int) -> np.ndarray | float:
+    """
+    Core logic to calculate skewness on a given data chunk.
+    'n_for_unbiased_calc' is the original N along the reduction axis for bias correction.
+    (This function remains the same as in the previous response)
+    """
+    current_chunk_reduction_axis_size = chunk_data.shape[axis] if axis is not None else chunk_data.size
+    
+    # Handle case where the effective axis length for the chunk is 0
+    if current_chunk_reduction_axis_size == 0:
+        if axis is None: return np.nan
+        out_shape_list = list(chunk_data.shape)
+        # Ensure axis is non-negative for del
+        current_axis_normalized_for_chunk = axis if axis >= 0 else axis + chunk_data.ndim
+        if 0 <= current_axis_normalized_for_chunk < len(out_shape_list):
+            del out_shape_list[current_axis_normalized_for_chunk]
+        else: # Should not happen if axis was validated for original array
+            return np.nan 
+        if not out_shape_list and chunk_data.ndim == 1 : return np.nan # scalar output
+        return np.full(tuple(out_shape_list) if out_shape_list else (), np.nan)
+
+
+    with np.errstate(divide='ignore', invalid='ignore'):
+        mean_val = np.mean(chunk_data, axis=axis, keepdims=True)
+
+        if bias:
+            std_val = np.std(chunk_data, axis=axis, keepdims=True, ddof=0)
+        else:
+            if n_for_unbiased_calc == 1:
+                std_val = np.full_like(mean_val, np.nan)
+            else:
+                std_val = np.std(chunk_data, axis=axis, keepdims=True, ddof=1)
+        
+        zero_std_mask = np.isclose(std_val, 0.0)
+        std_val_safe = np.where(zero_std_mask, 1.0, std_val)
+        
+        deviations = chunk_data - mean_val
+        z_scores = deviations / std_val_safe
+        z_scores_cubed = z_scores**3
+        skewness_intermediate = np.mean(z_scores_cubed, axis=axis)
+
+    if not bias:
+        if n_for_unbiased_calc <= 2:
+            return np.full_like(skewness_intermediate, np.nan)
+        
+        correction_factor = np.sqrt(n_for_unbiased_calc * (n_for_unbiased_calc - 1.0)) / (n_for_unbiased_calc - 2.0)
+        skewness_result = skewness_intermediate * correction_factor
+    else:
+        skewness_result = skewness_intermediate
+    
+    final_zero_std_mask = zero_std_mask
+    if axis is not None and mean_val.ndim > skewness_result.ndim: # Check if reduction happened
+        final_zero_std_mask = zero_std_mask.squeeze(axis=axis)
+    
+    skewness_result = np.where(np.logical_and(final_zero_std_mask, ~np.isnan(skewness_result)), 0.0, skewness_result)
+    
+    return skewness_result
+
+
+def skew(arr: np.ndarray,
+                axis: int | None = None,
+                bias: bool = True,
+                chunk_size: int | None = None) -> np.ndarray | float:
+    """
+    Calculates skewness, with optional and automatic chunking for memory efficiency.
+    """
+    if not isinstance(arr, np.ndarray):
+        try:
+            arr_internal = np.array(arr, dtype=float)
+        except Exception as e:
+            raise TypeError(f"Input 'arr' must be a NumPy array or convertible to one. Error: {e}")
+    elif np.issubdtype(arr.dtype, np.integer) or np.issubdtype(arr.dtype, np.bool_):
+        arr_internal = arr.astype(float)
+    else:
+        arr_internal = arr
+
+    if arr_internal.ndim == 0: # Scalar input
+        return 0.0 if bias else np.nan
+
+    # Normalize axis and get N for global checks
+    current_axis_normalized: int
+    n_global_reduction_axis: int
+    if axis is None:
+        current_axis_normalized = -1 # Placeholder, not used for indexing shape
+        n_global_reduction_axis = arr_internal.size
+    else:
+        if not (-arr_internal.ndim <= axis < arr_internal.ndim):
+            raise np.AxisError(f"Axis {axis} is out of bounds for array of dimension {arr_internal.ndim}")
+        current_axis_normalized = axis if axis >= 0 else axis + arr_internal.ndim
+        n_global_reduction_axis = arr_internal.shape[current_axis_normalized]
+
+    # Handle empty array or zero-length reduction axis globally
+    if arr_internal.size == 0 or n_global_reduction_axis == 0:
+        if axis is None: return np.nan
+        out_shape_list = list(arr_internal.shape)
+        del out_shape_list[current_axis_normalized]
+        if not out_shape_list and arr_internal.ndim == 1 : return np.nan
+        return np.full(tuple(out_shape_list) if out_shape_list else (), np.nan)
+
+    # Global check for unbiased skew with N <= 2
+    if not bias and n_global_reduction_axis <= 2:
+        if axis is None: return np.nan
+        out_shape_list = list(arr_internal.shape)
+        del out_shape_list[current_axis_normalized]
+        if not out_shape_list and arr_internal.ndim == 1: return np.nan
+        return np.full(tuple(out_shape_list) if out_shape_list else (), np.nan)
+
+    # --- Chunking Logic ---
+    apply_chunking = False
+    effective_chunk_size = 0 # This will be the number of slices along iteration_axis
+    iteration_axis = -1  # Axis along which to iterate for chunks
+
+    # Determine iteration_axis (axis to slice for chunks)
+    if axis is None or arr_internal.ndim <= 1: # No chunking for flat or 1D arrays in this scheme
+        pass
+    else: # ndim > 1 and axis is not None
+        iteration_axis = 0 if current_axis_normalized != 0 else 1
+        # (If current_axis_normalized is 0 and ndim is only 1, previous block catches it)
+        # (If current_axis_normalized is 1 and ndim is only 1, previous block catches it)
+        # Ensure iteration_axis is valid if ndim just became 2 and iteration_axis was picked as 1
+        if iteration_axis >= arr_internal.ndim:
+            iteration_axis = -1 # Cannot find a suitable different axis for iteration
+
+
+    if chunk_size is not None: # User specified a chunk size
+        if not isinstance(chunk_size, int) or chunk_size <= 0:
+            raise ValueError("User-specified chunk_size must be a positive integer.")
+        if iteration_axis != -1 and arr_internal.shape[iteration_axis] > chunk_size:
+            apply_chunking = True
+            effective_chunk_size = chunk_size
+        # Else: user chunk_size is too large or no iteration_axis, process as one.
+    elif iteration_axis != -1: # Auto-chunking mode, and a valid iteration_axis exists
+        if arr_internal.nbytes > _MIN_ARRAY_SIZE_FOR_AUTOCHUNK_MB * 1024 * 1024:
+            bytes_per_slice_along_iteration_axis = arr_internal.nbytes / arr_internal.shape[iteration_axis]
+            
+            if bytes_per_slice_along_iteration_axis > 0: # Avoid division by zero for shape (...,0,...)
+                target_data_chunk_bytes = (_DEFAULT_TARGET_CHUNK_PROCESSING_MEMORY_MB * 1024 * 1024) / _DEFAULT_K_MEMORY_MULTIPLIER
+                desired_chunk_len = max(1, int(np.floor(target_data_chunk_bytes / bytes_per_slice_along_iteration_axis)))
+                
+                if arr_internal.shape[iteration_axis] > desired_chunk_len:
+                    apply_chunking = True
+                    effective_chunk_size = desired_chunk_len
+            # Else: bytes_per_slice is 0 (e.g. shape=(100,0,10)), no chunking needed on this axis.
+            print(f"Large Array Detect: Auto-Chunking at Chunk Size: {effective_chunk_size}")
+        # Else: array not large enough for auto-chunking, or no iteration_axis.
+
+    # --- Actual processing ---
+    if not apply_chunking:
+        return _calculate_skew_on_chunk(arr_internal, axis, bias, n_global_reduction_axis)
+    else:
+        # Chunking logic
+        num_total_slices_on_iteration_axis = arr_internal.shape[iteration_axis]
+        # Ensure effective_chunk_size is valid if auto-calculated or user-provided
+        if effective_chunk_size <=0 : effective_chunk_size = 1 # Should be caught by checks before
+
+        num_chunks = int(np.ceil(num_total_slices_on_iteration_axis / effective_chunk_size))
+        
+        results_list = []
+        slicer = [slice(None)] * arr_internal.ndim
+
+        for i in range(num_chunks):
+            start_idx = i * effective_chunk_size
+            end_idx = min(start_idx + effective_chunk_size, num_total_slices_on_iteration_axis)
+            slicer[iteration_axis] = slice(start_idx, end_idx)
+            
+            current_data_chunk = arr_internal[tuple(slicer)]
+            
+            skew_for_chunk = _calculate_skew_on_chunk(current_data_chunk,
+                                                      axis,
+                                                      bias,
+                                                      n_global_reduction_axis)
+            results_list.append(skew_for_chunk)
+        
+        # Determine concatenation axis carefully
+        concat_axis = iteration_axis
+        if axis is not None and iteration_axis > current_axis_normalized :
+            concat_axis -= 1 # Adjust because reduction axis was removed from shape of results
+        
+        return np.concatenate(results_list, axis=concat_axis)
 
 class Storage(UserDict): # CHECKED
     """
@@ -470,11 +1124,14 @@ class Storage(UserDict): # CHECKED
             return self.data[name]
         # Raise AttributeError for missing attributes (standard behavior)
         raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{name}'")
+    
+    def __bool__(self):
+        return bool(self.data)
 
 class TradeWindowOps:
 
     @classmethod    
-    def max(cls, data: np.ndarray):
+    def max(cls, data: np.ndarray, axis: int = 1):
         """
         Calculate the maximum of the input data.
 
@@ -488,10 +1145,10 @@ class TradeWindowOps:
         float
             Maximum value of the array.
         """
-        return np.max(data)
+        return np.max(data, axis)
     
     @classmethod
-    def min(cls, data: np.ndarray):
+    def min(cls, data: np.ndarray, axis: int = 1):
         """
         Calculate the minimum of the input data.
 
@@ -505,10 +1162,10 @@ class TradeWindowOps:
         float
             Minimum value of the array.
         """
-        return np.min(data)
+        return np.min(data, axis)
     
     @classmethod
-    def mean(cls, data: np.ndarray):
+    def mean(cls, data: np.ndarray, axis: int = 1):
         """
         Calculate the mean of the input data.
 
@@ -522,17 +1179,17 @@ class TradeWindowOps:
         float
             Mean value of the array.
         """
-        return np.mean(data)
+        return np.mean(data, axis)
     
     @classmethod
-    def median(cls, data: np.ndarray):
+    def median(cls, data: np.ndarray, axis: int = 1):
         """
         Calculate the median of the input data.
         """
-        return np.median(data)
+        return np.median(data, axis)
     
     @classmethod
-    def sum(cls, data: np.ndarray):
+    def sum(cls, data: np.ndarray, axis: int = 1):
         """
         Calculate the sum of the input data.
 
@@ -546,10 +1203,10 @@ class TradeWindowOps:
         float
             Sum value of the array.
         """
-        return np.sum(data)
+        return np.sum(data, axis)
     
     @classmethod
-    def std(cls, data: np.ndarray):
+    def std(cls, data: np.ndarray, axis: int = 1):
         """
         Calculate the standard deviation of the input data.
 
@@ -563,10 +1220,10 @@ class TradeWindowOps:
         float
             Standard deviation value of the array.
         """
-        return np.std(data)
+        return np.std(data, axis)
     
     @classmethod
-    def skew(cls, data: np.ndarray):
+    def skew(cls, data: np.ndarray, axis: int = 1):
         """
         Calculate the skew of the input data.
 
@@ -580,10 +1237,10 @@ class TradeWindowOps:
         float
             Skew value of the array.
         """
-        return skew(data)
+        return skew(data, axis).squeeze()
     
     @classmethod
-    def kurtosis(cls, data: np.ndarray):
+    def kurtosis(cls, data: np.ndarray, axis: int = 1):
         """
         Calculate the kurtosis of the input data.
 
@@ -597,10 +1254,10 @@ class TradeWindowOps:
         float
             Kurtosis value of the array.
         """
-        return kurtosis(data)
+        return kurtosis(data, axis)
     
     @classmethod
-    def variance(cls, data: np.ndarray):
+    def variance(cls, data: np.ndarray, axis: int = 1):
         """
         Calculate the variance of the input data.
 
@@ -614,10 +1271,10 @@ class TradeWindowOps:
         float
             Variance value of the array.
         """
-        return np.var(data)
+        return np.var(data, axis)
     
     @classmethod
-    def first(cls, data: np.ndarray):
+    def first(cls, data: np.ndarray, axis: int = 1):
         """
         Get the first value of the input data.
 
@@ -631,10 +1288,10 @@ class TradeWindowOps:
         float
             First value of the array.
         """
-        return data[0]
+        return first(data, axis)
     
     @classmethod
-    def last(cls, data: np.ndarray):
+    def last(cls, data: np.ndarray, axis: int = 1):
         """
         Get the last value of the input data.
 
@@ -648,4 +1305,4 @@ class TradeWindowOps:
         float
             Last value of the array.
         """
-        return data[-1]
+        return last(data, axis)

@@ -4,6 +4,16 @@ from .exceptions import InvalidWindowSizeError
 import numpy as np
 
 @dataclass
+class SubWindowsSettings:
+    """
+    Configuration settings for sub-window operations.
+    """
+    window_sizes: list[int]
+    alignment: str
+    axis: int = 1
+    return_origin: bool = True
+
+@dataclass
 class FutureWindowSettings:
     """
     Configuration settings for window operations in time series analysis.

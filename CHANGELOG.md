@@ -107,3 +107,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Issues
 - Need to update the documentation to reflect the new changes.
+
+## [0.3.8] - 2025-05
+
+### Added
+- Compressors added to a FeatureChronicle are now passed back to the parent Chronicle.
+- New SubWindowsSettings class added and integrated
+- sub_window_over_axis() method added to Chronicle class - will eventually replace subwindow_over_samples
+- New compress_features_to_sample method added.
+- `to_numpy` method added across all FrameBase Subclasses
+
+
+### Changed
+- Optimization of window creation and array form switching
+- Major optimizations of TradeOps compression function, to utilize vector opterations.
+- Custom `skew` and `kurtosis` method's expaded and optimized to be able to handle extremely large arrays efficiently, with auto-batching.
+
+### Issues
+- Need to update the documentation to reflect the new changes.

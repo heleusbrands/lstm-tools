@@ -5,6 +5,7 @@ from enum import Enum
 import numpy as np
 from collections import UserDict
 from typing import Any
+from .utils import TradeWindowOps
 
 
 # Create a custom template
@@ -42,6 +43,8 @@ class MetaData(UserDict): # CHECKED
         if hasattr(obj, '_level'): self['_level'] = obj._level
         if hasattr(obj, '_shape'): self['_shape'] = obj._shape
         if hasattr(obj, 'scaler'): self['scaler'] = obj.scaler
+        if hasattr(obj, 'compressors'): self['compressors'] = obj.compressors
+        if hasattr(obj, 'sub_window_settings'): self['sub_window_settings'] = obj.sub_window_settings
     
 
     def __setattr__(self, name: str, value: Any) -> None:
@@ -108,6 +111,7 @@ class FrameBase(np.ndarray):
     subtype = None
     level = 0
     _idx = None
+    ops = TradeWindowOps
     format_input_feature = lambda input_data, cols, subtype: [subtype(input_data[i], name) for i, name in enumerate(cols)]
     format_input_sequence = lambda input_data, cols, subtype: [subtype(data, cols = cols, idx = i) for i, data in enumerate(input_data)]
 
@@ -146,11 +150,11 @@ class FrameBase(np.ndarray):
             return
         meta = metaobj.__get_metadata__()
         for key, value in meta.items():
-            if not hasattr(obj, key) and not getattr(obj, key, None):
+            if not hasattr(obj, key) or not getattr(obj, key, None):
                 if key == '_shape' and hasattr(obj, 'shape'):
-                    obj._shape = obj.shape
                     continue
                 setattr(obj, key, value)
+        return obj
 
             
 

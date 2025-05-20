@@ -125,6 +125,9 @@ class FeatureSample(FrameBase):
     def _as_nparray(self):
         """Return the underlying array data."""
         return super().__array__()
+    
+    def to_numpy(self):
+        return self._as_nparray()
 
     def add_compressor(self, compressor, name=None):
         """
@@ -306,7 +309,16 @@ class FeatureChronicle(FrameBase):
     operations = TradeWindowOps
 
     @profile
-    def __new__(cls, input_data, name=None, dtype=None, time=None, compressors=None, idx=None):
+    def __new__(
+        cls, 
+        input_data, 
+        name=None, 
+        dtype=None, 
+        time=None, 
+        compressors=None, 
+        idx=None,
+        source=None
+        ):
         """
         Create a new FeatureChronicle instance.
 
@@ -348,19 +360,29 @@ class FeatureChronicle(FrameBase):
         
         # Convert input data to numpy array
         if isinstance(input_data[0], cls.subtype):
-            base_data = np.array([np.array(d).view(np.ndarray) for d in input_data], dtype=cls.nptype)
+            base_data = np.array([d.view(np.ndarray) for d in input_data], dtype=cls.nptype)
+        elif isinstance(input_data, np.ndarray):
+            base_data = input_data
+            cls.nptype = base_data.dtype
         else:
             base_data = np.array(input_data, dtype=cls.nptype)
         
+        if np.any(source):
+            if getattr(source, 'compressors', None) and name:
+                if getattr(source.compressors, name, None):
+                    compressors = source.compressors[name]
+
         # Create view and set attributes
-        obj = np.array(base_data, dtype=dtype).view(cls)
+        obj = base_data.view(cls)
         obj.subwindow_settings = ExpandingWindowSettings()
         obj.compressors = compressors
         obj._time = time
-        obj.name = name + f"_{obj.shape[1]}"
+        # obj.name = name + f"_{obj.shape[1]}"
+        obj.name = name
         obj._shape = base_data.shape
         obj._level = 1
         obj._idx = idx
+        obj._source = source
         return obj
 
     def __array_finalize__(self, obj):
@@ -415,6 +437,9 @@ class FeatureChronicle(FrameBase):
     def _as_nparray(self):
         """Return the underlying array data."""
         return super().__array__()
+    
+    def to_numpy(self):
+        return self._as_nparray()
 
     def add_compressor(self, compressor, name=None):
         """
@@ -427,6 +452,7 @@ class FeatureChronicle(FrameBase):
         if name:
             compressor.__name__ = name
         self.compressors.append(compressor)
+        if np.any(self._source): self._source.compressors[self.name] = self.compressors
         return self
     
     def get_subwindows(self):

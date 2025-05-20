@@ -138,7 +138,10 @@ class Sample(FrameBase):
         if isinstance(input_data[0], cls.subtype): 
             # Use existing TimeFrame's data
             cls.nptype = input_data[0].nptype 
-            base_data = np.array([np.array(d).view(np.ndarray) for d in input_data], dtype=cls.nptype)
+            base_data = np.array([d.view(np.ndarray) for d in input_data], dtype=cls.nptype)
+        elif isinstance(input_data, np.ndarray):
+            base_data = input_data
+            cls.nptype = base_data.dtype
         else:
             # Use raw data directly
             base_data = np.array(input_data, dtype=cls.nptype)
@@ -150,7 +153,7 @@ class Sample(FrameBase):
                 time = input_data[0].time
 
         # Create a view of the base data and store the data directly in the view
-        obj = np.array(base_data, dtype=dtype).view(cls)
+        obj = base_data.view(cls)
         obj._time = time
         obj._shape = base_data.shape
         obj._cols = cols
@@ -207,13 +210,13 @@ class Sample(FrameBase):
         if isinstance(item, str):
             # Get by column name
             idx = self._cols.index(item)
-            return FeatureSample(np.array(self).view(np.ndarray)[:, idx], name=item, time=self._time)
+            return FeatureSample(self.view(np.ndarray)[:, idx], name=item, time=self._time)
         elif isinstance(item, int):
             # Get by numeric index - return a TimeFrame
             if not (0 <= item < len(self)):
                 raise IndexError(f"Index {item} out of bounds for Sample with {len(self)} items")
             # Create a TimeFrame only when explicitly requested by index
-            raw_data = np.array(self).view(np.ndarray)[item]
+            raw_data = self.view(np.ndarray)[item]
             time_value = self._time[item] if self._time is not None and hasattr(self._time, '__getitem__') else None
             return self.subtype(raw_data, self._cols, idx=item, time=time_value)
         elif isinstance(item, tuple) and len(item) == 2:
@@ -222,11 +225,11 @@ class Sample(FrameBase):
                 # Handle column name in second position
                 col_idx = self._cols.index(item[1])
                 modified_item = (item[0], col_idx)
-                return np.array(self).view(np.ndarray)[modified_item]
-            return np.array(self).view(np.ndarray)[item]
+                return self.view(np.ndarray)[modified_item]
+            return self.view(np.ndarray)[item]
         else:
             # Slice handling
-            raw_slice = np.array(self).view(np.ndarray)[item]
+            raw_slice = self.view(np.ndarray)[item]
             if isinstance(raw_slice, np.ndarray) and len(raw_slice.shape) > 0:
                 time_slice = self._time[item] if self._time is not None and hasattr(self._time, '__getitem__') else self._time
                 
@@ -237,7 +240,7 @@ class Sample(FrameBase):
     
     def __array__(self):
         """Return the underlying array data."""
-        return np.array(self).view(np.ndarray)
+        return self.view(np.ndarray)
     
     def __getattribute__(self, name: str):
         # First get access to the _cols attribute from the base object
@@ -305,7 +308,7 @@ class Sample(FrameBase):
         torch.Tensor
             Sample data as a PyTorch tensor on the specified device.
         """
-        return torch.from_numpy(np.array(self).view(np.ndarray)).to(device)
+        return torch.from_numpy(self.view(np.ndarray)).to(device)
 
     @profile
     def to_tfTensor(self, device = 'cpu'):
@@ -322,7 +325,7 @@ class Sample(FrameBase):
         tf.Tensor
             Sample data as a TensorFlow tensor on the specified device.
         """
-        return convert_to_tensor(np.array(self).view(np.ndarray)).to(device)
+        return convert_to_tensor(self.view(np.ndarray)).to(device)
 
     @profile
     def to_DataFrame(self):
@@ -335,7 +338,7 @@ class Sample(FrameBase):
             Sample data as a pandas DataFrame.
         """
         cols = self._cols
-        df = pd.DataFrame(np.array(self).view(np.ndarray), columns=self._cols)
+        df = pd.DataFrame(self.view(np.ndarray), columns=self._cols)
         df.insert(0, 'time', self._time)
         return df
 
@@ -411,7 +414,7 @@ class Sample(FrameBase):
         foffset = self.window_settings.future.offset
         hspacing = self.window_settings.historical.spacing
         step = self.window_settings.stride
-        data = np.array(self).view(np.ndarray)
+        data = self.view(np.ndarray)
         _, f = hf_sliding_window(data, hsize, fsize, foffset, hspacing, step)
         return Chronicle(
             f, 
@@ -437,7 +440,7 @@ class Sample(FrameBase):
         foffset = self.window_settings.future.offset
         hspacing = self.window_settings.historical.spacing
         step = self.window_settings.stride
-        data = np.array(self).view(np.ndarray)
+        data = self.view(np.ndarray)
         h, _ = hf_sliding_window(data, hsize, fsize, foffset, hspacing, step)
         return Chronicle(
             h, 
@@ -463,7 +466,7 @@ class Sample(FrameBase):
         foffset = self.window_settings.future.offset
         hspacing = self.window_settings.historical.spacing
         step = self.window_settings.stride
-        data = np.array(self).view(np.ndarray)
+        data = self.view(np.ndarray)
         ht, ft = self._time_to_hf_sliding_window()
         h, f = hf_sliding_window(data, hsize, fsize, foffset, hspacing, step)
         return (
@@ -475,7 +478,7 @@ class Sample(FrameBase):
     def join_samples_by_window_size(cls, window_size, samples: list):
         samples = [s for s in samples if s.name.split('_')[1] == str(window_size)]
         cols = np.array([s._cols for s in samples]).flatten().tolist()
-        data = np.concatenate([np.array(s) for s in samples], axis=1)
+        data = np.concatenate([s.view(np.ndarray) for s in samples], axis=1)
         return Sample(data, cols=cols, time=samples[0]._time, scaler=samples[0].scaler)
     
     @classmethod
@@ -486,7 +489,7 @@ class Sample(FrameBase):
             sizes = {p for p in col_parts if p.isdigit()}
             name = f'compressed_{"".join(sizes)}_window'
             cols = ['_'.join([x for x in c.split('_') if not x.isdigit()]) for c in cols]
-        data = np.concatenate([np.array(s) for s in samples], axis=1)
+        data = np.concatenate([s.view(np.ndarray) for s in samples], axis=1)
         return Sample(data, cols=cols, time=samples[0]._time, scaler=samples[0].scaler, name=name)
 
     @profile
@@ -525,7 +528,7 @@ class Sample(FrameBase):
         
         # Use time values if available, otherwise use index
         x_values = self._time if self._time is not None else np.arange(self._shape[1])
-        data = np.array(self).view(np.ndarray)
+        data = self.view(np.ndarray)
         
         # Add a line for each column in the data, excluding specified features
         for i, col_name in enumerate(self._cols):
@@ -672,7 +675,7 @@ class Sample(FrameBase):
         """
         if not self.scaler:
             raise ValueError("Scaler is not set")
-        data = np.array(self).view(np.ndarray)
+        data = self.view(np.ndarray)
         return Sample(self.scaler.inverse_transform(data), cols=self._cols, scaler=self.scaler, time=self._time)
 
     @profile
@@ -692,7 +695,7 @@ class Sample(FrameBase):
         np.ndarray
             Feature data.
         """
-        data = np.array(self).view(np.ndarray)
+        data = self.view(np.ndarray)
         if isinstance(feature, str) and feature.lower() == "all":
             if exc is None:
                 exc = []

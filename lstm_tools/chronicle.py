@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from sklearn.model_selection import train_test_split
+
 from lstm_tools.settings import SubWindowsSettings
 from .base import FrameBase
 from .sample import Sample
@@ -8,6 +10,7 @@ from .utils import *
 from line_profiler import profile
 from typing import TYPE_CHECKING, List, Union
 import numpy as np
+from sklearn.preprocessing import RobustScaler
 import torch
 from tensorflow import convert_to_tensor
 from .exceptions import EmptyDataError, InvalidDataTypeError, DataError
@@ -48,6 +51,7 @@ class Chronicle(FrameBase):
     subtype = Sample
     level = 0
     nptype = np.float32
+    scaler = RobustScaler(copy=False)
 
     """
     3D Array of Samples
@@ -85,16 +89,16 @@ class Chronicle(FrameBase):
             
         # Create a new instance of the array
         if cls.subtype != Sample: cls.subtype = Sample
-        dtype = np.dtype(dtype) if dtype else np.dtype(cls.nptype)
+        if dtype: cls.nptype = np.dtype(dtype)
         if scaler:
             scaler = scaler
         else: 
-            scaler = getattr(input_data[0], 'scaler', None) if isinstance(input_data, (list, tuple)) and len(input_data) > 0 else None
+            scaler = getattr(input_data[0], 'scaler', None) if isinstance(input_data, (list, tuple)) and len(input_data) > 0 else cls.scaler
         
         # Prepare data to store directly in the array view
         if isinstance(input_data[0], cls.subtype): 
             # Use existing Sample's data
-            cls.nptype = input_data[0].nptype
+            if not dtype: cls.nptype = input_data[0].nptype
             base_data = np.array([np.array(d).view(np.ndarray) for d in input_data], dtype=cls.nptype)
             
             # Handle time for generated data
@@ -104,8 +108,9 @@ class Chronicle(FrameBase):
                     if time is not None:
                         time = np.array([time[i] if i < len(time) else None for i in range(len(input_data))])
         elif isinstance(input_data, np.ndarray):
-            base_data = input_data
-            cls.nptype = base_data.dtype
+            if not dtype: cls.nptype = input_data.dtype
+            if input_data.dtype != cls.nptype: base_data = input_data.astype(cls.nptype)
+            else: base_data = input_data
         else:
             # Use raw data directly
             base_data = np.array(input_data, dtype=cls.nptype)
@@ -299,6 +304,60 @@ class Chronicle(FrameBase):
         data = np.delete(self.to_numpy(), index, axis=2)
         cols = [c for c in self._cols if c != feature]
         return Chronicle(data, cols=cols, time=self._time, scaler=self.scaler, source=self)
+    
+    def scale(self, scaler = None):
+        if scaler is None:
+            scaler = self.scaler
+        scaler.fit(self._to_2d())
+        return Chronicle(self._to_3d(scaler.transform(self._to_2d())), cols=self._cols, time=self._time, scaler=scaler)
+    
+    def scale_chronicle(self, chronicle: 'Chronicle'):
+        data = self.scaler.transform(chronicle._to_2d())
+        data = chronicle._to_3d(data)
+        return Chronicle(data, cols=chronicle._cols, time=chronicle._time, scaler=self.scaler)
+    
+    def scale_sample(self, sample: 'Sample'):
+        data = self.scaler.transform(sample.to_numpy())
+        return Sample(data, sample._cols, time=sample._time, scaler=self.scaler)
+    
+    def scale_array(self, array: np.ndarray):
+        return self.scaler.transform(array)
+    
+    def unscale_chronicle(self, chronicle: 'Chronicle'):
+        data = self.scaler.inverse_transform(chronicle._to_2d())
+        data = chronicle._to_3d(data)
+        return Chronicle(data, cols=chronicle._cols, time=chronicle._time, scaler=self.scaler)
+    
+    def unscale_sample(self, sample: 'Sample'):
+        data = self.scaler.inverse_transform(sample.to_numpy())
+        return Sample(data, sample._cols, time=sample._time, scaler=self.scaler)
+    
+    def unscale_array(self, array: np.ndarray):
+        return self.scaler.inverse_transform(array)
+    
+    def _to_2d(self):
+        return self.to_numpy().reshape(-1, self._shape[2])
+    
+    def _to_3d(self, data):
+        return data.reshape(self.shape)
+
+    @classmethod
+    def split(cls, historical: 'Chronicle', future: 'Sample', test_size: float = 0.2, random_state: int = 42):
+        htype = type(historical)
+        ftype = type(future)
+        hcols = historical.feature_names
+        fcols = future.feature_names
+        hscaler = historical.scaler
+        fscaler = future.scaler
+        htime = historical.time
+        ftime = future.time
+        historical, test_hist, future, test_fut = train_test_split(historical, future, test_size=test_size, random_state=random_state)
+        return (
+            htype(historical, cols=hcols, time=htime, scaler=hscaler), 
+            htype(test_hist, cols=hcols, time=htime, scaler=hscaler), 
+            ftype(future, cols=fcols, time=ftime, scaler=fscaler), 
+            ftype(test_fut, cols=fcols, time=ftime, scaler=fscaler)
+            )
 
     def to_numpy(self):
         return self.__array__()

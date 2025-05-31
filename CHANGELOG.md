@@ -125,3 +125,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Issues
 - Need to update the documentation to reflect the new changes.
+
+## [0.3.9] - 2025-05
+
+### Added
+- `Chronicle`
+-- `scale` method
+-- `scale_chronicle` method
+-- `scale_sample` method
+-- `scale_array` method
+-- `unscale_chronicle` method
+-- `unscale_sample` method
+-- `unscale_array` method
+-- `_to_2d` method
+-- `_to_3d` method
+-- `split` method
+
+- `Sample`
+-- `scale` method
+-- `unscale` method
+-- `splilt` method
+
+
+### Changed
+- Now both the Sample and Chronicle classes now have default class Scalers
+- Scalers are now initialized with "copy = False" to avoid unnessary memory usage for large arrays.
+
+### Fixed
+- dtypes specified during class initialization are now properly incorperated in all senarios.
+
+### Issues
+- Need to update the documentation to reflect the new changes.

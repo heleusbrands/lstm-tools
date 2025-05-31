@@ -9,6 +9,7 @@ from .utils import *
 from .settings import HFWindowSettings
 from line_profiler import profile
 from sklearn.preprocessing import RobustScaler
+from sklearn.model_selection import train_test_split
 import torch
 from tensorflow import convert_to_tensor
 from typing import TYPE_CHECKING
@@ -52,6 +53,7 @@ class Sample(FrameBase):
     level = 0
     scaler_type = RobustScaler
     nptype = np.float32
+    scaler = RobustScaler(copy=False)
 
     """
     2D Array of TimeFrames
@@ -130,6 +132,8 @@ class Sample(FrameBase):
 
         if cls.subtype != TimeFrame: cls.subtype = TimeFrame # Update subtype
 
+        if not scaler and not np.any(source): scaler = cls.scaler
+
         if use_scaler: # Scaler Handling
             input_data, scaler = scaler_handler(input_data, scaler) # Scale input_data
 
@@ -140,8 +144,9 @@ class Sample(FrameBase):
             cls.nptype = input_data[0].nptype 
             base_data = np.array([d.view(np.ndarray) for d in input_data], dtype=cls.nptype)
         elif isinstance(input_data, np.ndarray):
-            base_data = input_data
-            cls.nptype = base_data.dtype
+            cls.nptype = dtype
+            base_data = input_data.astype(dtype)
+            
         else:
             # Use raw data directly
             base_data = np.array(input_data, dtype=cls.nptype)
@@ -289,6 +294,34 @@ class Sample(FrameBase):
         """
         self._cols = new_names
         return self
+    
+    def scale(self, scaler: RobustScaler = None):
+        if not scaler: scaler = self.scaler
+        scaler.fit(self.to_numpy())
+        return Sample(scaler.transform(self.to_numpy()), cols=self._cols, time=self._time, scaler=scaler, use_scaler=False)
+    
+    def unscale(self, scaler: RobustScaler = None):
+        if not scaler: scaler = self.scaler
+        data = scaler.inverse_transform(self.to_numpy())
+        return Sample(data, cols=self._cols, time=self._time, scaler=scaler, use_scaler=False)
+    
+    @classmethod
+    def split(cls, historical: 'Chronicle', future: 'Sample', test_size: float = 0.2, random_state: int = 42):
+        htype = type(historical)
+        ftype = type(future)
+        hcols = historical.feature_names
+        fcols = future.feature_names
+        hscaler = historical.scaler
+        fscaler = future.scaler
+        htime = historical.time
+        ftime = future.time
+        historical, test_hist, future, test_fut = train_test_split(historical.to_numpy(), future.to_numpy(), test_size=test_size, random_state=random_state)
+        return (
+            htype(historical, cols=hcols, time=htime, scaler=hscaler), 
+            htype(test_hist, cols=hcols, time=htime, scaler=hscaler), 
+            ftype(future, cols=fcols, time=ftime, scaler=fscaler), 
+            ftype(test_fut, cols=fcols, time=ftime, scaler=fscaler)
+            )
 
     def to_numpy(self):
         return self.__array__()

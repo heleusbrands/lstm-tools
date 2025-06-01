@@ -86,6 +86,17 @@ class Sample(FrameBase):
                 return time
             elif len(time.shape) == 2:
                 return time[idx]
+            
+        def scale_check(scaler, feature_names):
+            if not scaler: return False
+            try:
+                center = scaler.center_
+                scale = scaler.scale_
+                if len(center) != len(feature_names) or len(scale) != len(feature_names):
+                    return False
+                return True
+            except:
+                return False
 
         if isinstance(time, np.ndarray):
             time_exists = bool(np.any(time))
@@ -164,7 +175,8 @@ class Sample(FrameBase):
         obj._cols = cols
         obj._idx = idx
         obj._level = 0
-        obj.scaler = scaler
+        obj.scaled = scale_check(scaler, cols)
+        obj.scaler = scaler if obj.scaled else RobustScaler(copy=False)
         obj.name = name
         obj.window_settings = HFWindowSettings()
 

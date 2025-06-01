@@ -42,6 +42,7 @@ class MetaData(UserDict): # CHECKED
         if hasattr(obj, '_idx'): self['_idx'] = obj._idx
         if hasattr(obj, '_level'): self['_level'] = obj._level
         if hasattr(obj, '_shape'): self['_shape'] = obj._shape
+        if hasattr(obj, 'scaled'): self['scaled'] = obj.scaled
         if hasattr(obj, 'scaler'): self['scaler'] = obj.scaler
         if hasattr(obj, 'compressors'): self['compressors'] = obj.compressors
         if hasattr(obj, 'sub_window_settings'): self['sub_window_settings'] = obj.sub_window_settings
@@ -154,14 +155,36 @@ class FrameBase(np.ndarray):
                 if key == '_shape' and hasattr(obj, 'shape'):
                     continue
                 setattr(obj, key, value)
-        return obj
+        return obj    
 
-            
+    @property
+    def _scaler_center(self):
+        if not self.scaler: return None
+        if not hasattr(self.scaler, 'center_'): return None
+        return self.scaler.center_
+    
+    @property
+    def _scaler_scale(self):
+        if not self.scaler: return None
+        if not hasattr(self.scaler, 'scale_'): return None
+        return self.scaler.scale_
 
     @property
     def shape(self):
         if not self._shape and len(self) != 0: self._shape = (len(self), len(self[0]))
         return self._shape
+    
+    @property
+    def is_scaled(self):
+        if not self.scaler: return False
+        try:
+            center = self.scaler.center_
+            scale = self.scaler.scale_
+            if len(center) != len(self._cols) or len(scale) != len(self._cols):
+                return False
+            return True
+        except:
+            return False
     
     @shape.setter
     def shape(self, value):

@@ -307,7 +307,10 @@ class Chronicle(FrameBase):
     
     def scale(self, scaler = None):
         if scaler is None:
-            scaler = self.scaler
+            if self.is_scaled:
+                return self
+            else:
+                scaler = self.scaler
         scaler.fit(self._to_2d())
         return Chronicle(self._to_3d(scaler.transform(self._to_2d())), cols=self._cols, time=self._time, scaler=scaler)
     
@@ -347,8 +350,8 @@ class Chronicle(FrameBase):
         ftype = type(future)
         hcols = historical.feature_names
         fcols = future.feature_names
-        hscaler = historical.scaler
-        fscaler = future.scaler
+        hscaler = historical.scaler if historical.is_scaled else None
+        fscaler = future.scaler if future.is_scaled else None
         htime = historical.time
         ftime = future.time
         historical, test_hist, future, test_fut = train_test_split(historical, future, test_size=test_size, random_state=random_state)

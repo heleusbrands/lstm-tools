@@ -544,6 +544,8 @@ class Chronicle(FrameBase):
 
         if has_axis:
             results = method(data, axis=axis)
+            if len(results.shape) > 1:
+                results = results.squeeze()
             return FeatureSample(results, name=name, time=time)
         
         results = [method(d) for d in data]

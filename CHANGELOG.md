@@ -175,3 +175,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Issues
 - Need to update the documentation to reflect the new changes.
+
+## [0.4.1] - 2025-05
+
+### Fixed
+- Added a check when compressing a FeatureChronicle to ensure the resulting array is 1D.
+
+### Issues
+- Need to update the documentation to reflect the new changes.
+
+### To Do
+- Add more robust shape checks to the classes upon creation to ensure issues with shape are easily debugable. 
